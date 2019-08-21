@@ -13,7 +13,7 @@ impl CsvDestination for DataFrame {
         // let mut writer = csv::Writer::from_path("/Users/kylemccarthy/Downloads/out.csv").unwrap();
 
         writer
-            .write_record(self.get_columns())
+            .write_record(self.columns())
             .context(ErrorKind::CsvError)?;
 
         for row in self.iter() {
@@ -39,17 +39,20 @@ mod tests {
 
     #[test]
     fn it_df_to_csv() {
-        let mut df = DataFrame::default();
+        let mut df = DataFrame::with_columns(vec!["a", "b", "c"]);
 
-        df.set_columns(vec!["a".into(), "b".into(), "c".into()]);
+        df.push_row(vec!["x".into(), 1.into(), true.into()] as Vec<Value>)
+            .unwrap();
 
-        df.push_data(vec!["x".into(), 1.into(), true.into()] as Vec<Value>);
+        df.push_row(vec!["y".into(), 2.into(), true.into()] as Vec<Value>)
+            .unwrap();
 
-        df.push_data(vec!["y".into(), 2.into(), true.into()] as Vec<Value>);
-
-        df.push_data(vec!["z".into(), 3.into(), false.into()] as Vec<Value>);
+        df.push_row(vec!["z".into(), 3.into(), false.into()] as Vec<Value>)
+            .unwrap();
 
         let res = df.to_csv();
+
+        // TODO add some way to data written
         dbg!(res);
     }
 }

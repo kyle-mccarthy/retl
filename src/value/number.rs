@@ -1,9 +1,10 @@
 use crate::error::{self as error, ResultExt};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::convert::{From, TryInto};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub enum Integer {
     Negative(i64),
     Positive(u64),
@@ -92,10 +93,10 @@ macro_rules! integer_from_signed {
 integer_from_unsigned!(u8, u16, u32, u64, usize);
 integer_from_signed!(i8, i16, i32, i64, isize);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub enum Number {
     Integer(Integer),
-    Decimal(f64),
+    Decimal(Decimal),
 }
 
 impl PartialEq for Number {
@@ -126,6 +127,7 @@ impl std::fmt::Display for Number {
         }
     }
 }
+
 impl<T: Into<Integer>> From<T> for Number {
     fn from(i: T) -> Self {
         Number::Integer(i.into())

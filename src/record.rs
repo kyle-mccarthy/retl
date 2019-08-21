@@ -16,6 +16,10 @@ impl Record {
     pub fn get(&self, index: usize) -> Option<&Value> {
         self.0.get(index)
     }
+
+    pub fn into_vec(self) -> Vec<Value> {
+        self.0
+    }
 }
 
 impl<T: Into<Value>> From<Vec<T>> for Record {

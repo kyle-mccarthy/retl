@@ -8,7 +8,7 @@ pub struct Error {
     inner: failure::Context<ErrorKind>,
 }
 
-#[derive(Copy, Clone, Debug, Fail)]
+#[derive(Copy, Clone, Debug, Fail, Eq, PartialEq)]
 pub enum ErrorKind {
     #[fail(display = "Error occured during i/o")]
     Io,
@@ -32,7 +32,19 @@ pub enum ErrorKind {
     NoneError,
 
     #[fail(display = "Failed to run the python code")]
-    PyO3Error
+    PyO3Error,
+
+    #[fail(display = "Invalid Operation")]
+    InvalidOperation,
+
+    #[fail(
+        display = "The length of the data does not match the expected length (expected ({}) != received = ({}))",
+        _0, _1
+    )]
+    InvalidDataLength(usize, usize),
+
+    #[fail(display = "The index is out of bounds (idx {}, len {})", _0, _1)]
+    IndexOutofBounds(usize, usize),
 }
 
 #[derive(Debug)]

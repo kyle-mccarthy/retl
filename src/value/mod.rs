@@ -8,9 +8,9 @@ use number::Number;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::convert::{From, TryInto};
-use std::ops::{Index, Deref};
+use std::ops::{Deref, Index};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -19,6 +19,7 @@ pub enum Value {
     Map(Map),
     Number(Number),
     Date(NaiveDateTime),
+    Binary(Vec<u8>),
 }
 
 impl PartialOrd for Value {
@@ -30,6 +31,7 @@ impl PartialOrd for Value {
             (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
             (Value::Date(a), Value::Date(b)) => Some(a.cmp(b)),
             (Value::Array(a), Value::Array(b)) => a.partial_cmp(b),
+            (Value::Binary(a), Value::Binary(b)) => a.partial_cmp(b),
             _ => None,
         }
     }
@@ -62,6 +64,12 @@ impl<'a> From<&'a str> for Value {
 impl From<Vec<Value>> for Value {
     fn from(v: Vec<Value>) -> Value {
         Value::Array(v)
+    }
+}
+
+impl From<Vec<u8>> for Value {
+    fn from(v: Vec<u8>) -> Value {
+        Value::Binary(v)
     }
 }
 
@@ -107,7 +115,8 @@ impl PartialEq for Value {
             (&Value::Array(a), &Value::Array(b)) => a == b,
             (&Value::Map(a), &Value::Map(b)) => a == b,
             (&Value::Date(a), &Value::Date(b)) => a == b,
-            _ => false, // values of other types can't be compared to one another
+            (&Value::Binary(a), &Value::Binary(b)) => a == b,
+            _ => false,
         }
     }
 }
@@ -122,6 +131,7 @@ impl std::fmt::Display for Value {
             Value::Date(d) => write!(f, "{}", d),
             Value::Map(_m) => write!(f, "display not implemented for map"),
             Value::Array(_a) => write!(f, "display not implemented for array"),
+            Value::Binary(_) => write!(f, "[bin data]"),
         }
     }
 }
@@ -132,7 +142,7 @@ impl<'a> Index<&'a str> for Value {
     fn index(&self, index: &'a str) -> &Self::Output {
         match self {
             Value::Map(map) => map.index(index),
-            _ => &Value::Null
+            _ => &Value::Null,
         }
     }
 }

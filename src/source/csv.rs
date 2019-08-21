@@ -1,6 +1,6 @@
-use crate::data_frame::DataFrame;
 use crate::error::{Error, ErrorKind, Result, ResultExt};
 use crate::value::Value;
+use crate::DataFrame;
 
 pub trait CsvSource {
     fn from_path(path: &str) -> Result<DataFrame> {
@@ -15,56 +15,54 @@ pub trait CsvSource {
     }
 
     fn read_csv<R: std::io::Read>(mut reader: csv::Reader<R>) -> Result<DataFrame> {
-        let mut data_frame = DataFrame::default();
+        // convert all the records into vectors of values
+        let data = reader
+            .records()
+            .filter_map(|record| record.ok())
+            .map(|record| {
+                record
+                    .into_iter()
+                    .map(|value| match value.len() {
+                        0 => Value::Null,
+                        _ => Value::String(value.to_string()),
+                    })
+                    .collect::<Vec<Value>>()
+            })
+            .collect::<Vec<Vec<Value>>>();
 
-        let mut size = 0usize;
+        // all the data should have the same number of rows which should equal the number of
+        // headers assuming that the CSV has headers
+        let expected_row_length = data.iter().map(|row| row.len()).max().unwrap_or(0);
 
-        for record in reader.records() {
-            let row = record.context(ErrorKind::CsvError)?;
-            let len = row.len();
-
-            if len > size {
-                size = len;
-            }
-
-            // in the future it will likely be possible to use a csv that is missing columns, if
-            // the use passes it in we just want to fill those rows in with null
-            let mut data_row = vec![];
-            for i in 0..size {
-                data_row.push(match row.get(i) {
-                    Some(v) => {
-                        if v.len() == 0 {
-                            Value::Null
-                        } else {
-                            Value::String(v.to_string())
-                        }
-                    }
-                    _ => Value::Null,
-                });
-            }
-
-            data_frame.push_data(data_row);
-        }
-
-        // if there are headers use them for the columns
-        if reader.has_headers() {
-            let headers = reader.headers().context(ErrorKind::CsvError)?;
-
-            for i in 0..headers.len() {
-                if let Some(h) = headers.get(i) {
-                    data_frame.push_column(h.to_string());
+        // ensure that each record has the expected number of columns, otherwise fill with null
+        let data = data
+            .into_iter()
+            .map(|mut record| {
+                if record.len() != expected_row_length {
+                    record.resize(expected_row_length, Value::Null);
                 }
-            }
+                record
+            })
+            .collect::<Vec<Vec<Value>>>();
 
-            return Ok(data_frame);
-        }
+        // get the headers or create default ones
+        let headers = match reader.headers() {
+            Ok(headers) => headers
+                .into_iter()
+                .map(|h| h.to_string())
+                .collect::<Vec<String>>(),
+            _ => (0..expected_row_length)
+                .map(|h| format!("{}", h))
+                .collect::<Vec<String>>(),
+        };
 
-        // no headers avail so use index of header as name
-        for i in 0..size {
-            data_frame.push_column(format!("{}", i));
-        }
+        // create  the dataframe with the headers
+        let mut df = DataFrame::with_columns(headers);
 
-        Ok(data_frame)
+        // push data
+        df.extend(data)?;
+
+        Ok(df)
     }
 }
 
@@ -96,30 +94,16 @@ mod test {
     use super::*;
 
     #[test]
-    fn it_reads_csv() {
-        let raw_data = r"a,b,c
-        1,2,3
-        4,5,6";
-
-        let result: Result<DataFrame> = DataFrame::from_reader(raw_data.as_bytes());
-
-        // let result: Result<DataFrame> =
-        // CsvSource::from_reader::<&[u8]>(raw_data.as_bytes() as &[u8]);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn it_into_data_frame() {
-        let raw_data = r"a,b,c
-        1,2,3
-        4,5,6";
+    fn it_reads_csv_to_data_frame() {
+        let raw_data = "a,b,c\r\n1,2,3\r\n4,5,6\r";
 
         let df = DataFrame::from_reader(raw_data.as_bytes()).unwrap();
 
-        let cols = df.get_columns();
+        let cols = df.columns();
 
         assert_eq!(*cols, vec!["a", "b", "c"]);
         assert_eq!(df.size(), 2);
+        assert_eq!(df[0], ["1".into(), "2".into(), "3".into()]);
+        assert_eq!(df[1], ["4".into(), "5".into(), "6".into()]);
     }
 }

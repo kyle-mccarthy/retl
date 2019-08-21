@@ -4,9 +4,9 @@ use std::borrow::Borrow;
 use std::collections::btree_map::{BTreeMap, Entry, Iter, IterMut, Keys, Values, ValuesMut};
 use std::hash::Hash;
 use std::iter::FromIterator;
-use std::ops::{Index, IndexMut, Deref};
+use std::ops::{Deref, Index, IndexMut};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash, PartialEq, PartialOrd)]
 pub struct Map {
     inner: BTreeMap<String, Value>,
 }
@@ -122,11 +122,11 @@ impl Clone for Map {
     }
 }
 
-impl PartialEq for Map {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.inner.eq(&rhs.inner)
-    }
-}
+// impl PartialEq for Map {
+//     fn eq(&self, rhs: &Self) -> bool {
+//         self.inner.eq(&rhs.inner)
+//     }
+// }
 
 impl<'a> Index<&'a str> for Map {
     type Output = Value;
@@ -134,7 +134,7 @@ impl<'a> Index<&'a str> for Map {
     fn index(&self, index: &str) -> &Self::Output {
         match self.get(index) {
             Some(value) => value,
-            _ => &Value::Null
+            _ => &Value::Null,
         }
     }
 }
@@ -156,21 +156,18 @@ impl<'a> Index<&'a String> for Map {
 }
 
 impl<'a> IndexMut<&'a str> for Map {
-
     fn index_mut(&mut self, index: &str) -> &mut Value {
         self.entry(index).or_insert(Value::Null)
     }
 }
 
 impl IndexMut<String> for Map {
-
     fn index_mut(&mut self, index: String) -> &mut Value {
         self.index_mut(index.deref())
     }
 }
 
 impl<'a> IndexMut<&'a String> for Map {
-
     fn index_mut(&mut self, index: &'a String) -> &mut Value {
         self.index_mut(index.deref())
     }
