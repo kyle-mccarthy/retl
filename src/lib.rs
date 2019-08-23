@@ -10,10 +10,3 @@ pub mod value;
 pub use dataframe::DataFrame;
 pub use record::Record;
 pub use value::Value;
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn it_works() {}
-}

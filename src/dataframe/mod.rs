@@ -1,75 +1,41 @@
+pub mod base;
+pub mod data;
+pub mod dim;
+pub mod view;
+
+pub use base::BaseDataFrame;
+pub use data::{Container, Data, DataSlice};
+pub use dim::Dim;
+pub use view::View;
+
 use crate::error::{ErrorKind, Result};
+
 use crate::Value;
 use std::iter::FromIterator;
 use std::iter::Iterator;
-use std::ops::{Index, IndexMut};
+use std::ops::Index;
 
-type OwnedValue = Value;
-type BorrowedValue<'a> = &'a Value;
-type BorrowedMutValue<'a> = &'a mut Value;
-
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub enum Layout {
-    Row,
-    Column,
-}
-
-// TODO adopt approach similar to ndarray where value has special repr / owned vs borrowed etc...
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct DataFrame {
-    columns: Vec<String>,
-    data: Vec<Value>,
-    dim: Dim,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub struct Dim(pub(crate) usize, usize);
-
-impl Default for Dim {
-    fn default() -> Self {
-        Dim(0, 0)
-    }
-}
-
-impl Dim {
-    pub(crate) fn new(x: usize, y: usize) -> Self {
-        Dim(x, y)
-    }
-
-    pub fn expected_len(&self) -> usize {
-        self.0 * self.1
-    }
-
-    /// Get the start and end index for a row
-    pub fn get_row_range(&self, row: usize) -> (usize, usize) {
-        let i = self.0 * row;
-        (i, i + self.0)
-    }
-
-    /// Calculate the position of a value in the buffer from the row number and the index of the
-    /// column
-    pub fn get_value_index(&self, row_number: usize, column_index: usize) -> usize {
-        (row_number * self.0) + column_index
-    }
-
-    pub fn shape(&self) -> (usize, usize) {
-        (self.0, self.1)
-    }
-}
+pub type DataFrame = BaseDataFrame<Data>;
 
 impl std::default::Default for DataFrame {
     fn default() -> Self {
-        DataFrame {
+        BaseDataFrame {
             columns: vec![],
             data: vec![],
+            ptr: 0,
             dim: Dim::default(),
         }
     }
 }
 
 impl DataFrame {
-    pub fn empty() -> DataFrame {
-        DataFrame::default()
+    pub(crate) fn from_view(view: View) -> Self {
+        DataFrame {
+            columns: view.columns,
+            data: view.data.to_owned(),
+            dim: view.dim,
+            ptr: 0,
+        }
     }
 
     pub fn new<S: Into<String>>(columns: Vec<S>, data: Vec<Vec<Value>>) -> DataFrame {
@@ -84,31 +50,12 @@ impl DataFrame {
             .map(Into::<String>::into)
             .collect::<Vec<String>>();
 
-        DataFrame {
+        BaseDataFrame {
             columns,
             data,
             dim,
             ..Default::default()
         }
-    }
-
-    pub fn with_columns<S: Into<String>>(columns: Vec<S>) -> DataFrame {
-        let columns = columns
-            .into_iter()
-            .map(Into::<String>::into)
-            .collect::<Vec<String>>();
-
-        let dim = Dim::new(columns.len(), 0);
-
-        DataFrame {
-            columns,
-            dim,
-            ..Default::default()
-        }
-    }
-
-    pub fn columns(&self) -> &Vec<String> {
-        &self.columns
     }
 
     pub fn push_column<S: Into<String>>(&mut self, column: S) {
@@ -140,7 +87,6 @@ impl DataFrame {
         // being removed
         for row_num in (0..self.dim.1).rev() {
             let index = self.dim.get_value_index(row_num, column);
-            dbg!(index);
             self.data.remove(index);
         }
 
@@ -193,112 +139,43 @@ impl DataFrame {
         self.columns.clear();
         self.data.clear();
     }
+}
 
-    pub fn size(&self) -> usize {
-        self.dim.1
-    }
-
-    pub fn shape(&self) -> (usize, usize) {
-        self.dim.shape()
-    }
-
-    pub fn row(&self, row: usize) -> Option<&[Value]> {
-        let (start, end) = self.dim.get_row_range(row);
-
-        if self.data.len() < end {
-            return None;
-        }
-
-        Some(&self.data[start..end])
-    }
-
-    pub fn row_mut(&mut self, row: usize) -> Option<&mut [Value]> {
-        let (start, end) = self.dim.get_row_range(row);
-
-        if self.data.len() < end {
-            return None;
-        }
-
-        Some(&mut self.data[start..end])
-    }
-
-    pub fn rows(&self) -> usize {
-        self.dim.1
-    }
-
-    pub fn iter(&self) -> Iter {
-        Iter::new(self)
-    }
-
-    // pub fn iter_mut(&mut self) -> IterMut {
-    //     IterMut::new(self)
-    // }
-
-    /// Print the data frame to std out for debugging
-    /// You can limit the number of rows shown with  the num_rows parameter. Will print at most
-    /// num_rows, 0 prints all rows.
-    pub fn debug(&self, num_rows: usize) {
-        use prettytable::{format::Alignment, Cell, Row, Table};
-
-        let mut table = Table::new();
-
-        let mut row = Row::empty();
-        for c in self.columns() {
-            row.add_cell(Cell::new(&c));
-        }
-        table.add_row(row);
-
-        for (n, record) in self.iter().enumerate() {
-            let mut row = Row::empty();
-
-            for c in record.iter() {
-                row.add_cell(Cell::new(c.to_string().as_str()));
-            }
-
-            table.add_row(row);
-
-            if n + 1 == num_rows {
-                let (_, width) = self.shape();
-                table.add_row(Row::new(vec![
-                    Cell::new_align("...", Alignment::CENTER).with_hspan(width)
-                ]));
-                break;
-            }
-        }
-
-        table.printstd();
+impl<'a> FromIterator<View<'a>> for DataFrame {
+    fn from_iter(view: View<'a>) -> DataFrame {
+        view.to_df()
     }
 }
 
-pub trait Get<T> {
-    type Output;
+// pub trait Get<T> {
+//     type Output;
 
-    fn get(&self, index: T) -> Option<&Self::Output>;
-}
-
-impl Get<(usize, usize)> for DataFrame {
-    type Output = Value;
-
-    fn get(&self, index: (usize, usize)) -> Option<&Self::Output> {
-        let index = self.dim.get_value_index(index.0, index.1);
-
-        self.data.get(index)
-    }
-}
-
-impl Get<usize> for DataFrame {
-    type Output = Value;
-
-    fn get(&self, index: usize) -> Option<&Self::Output> {
-        self.data.get(index)
-    }
-}
-
-// TODO determine if a view/window should be returned vs slice
-// pub struct View<'a> {
-//     data: &'a [Value],
-//     columns: &'a [String],
+//     fn get(&self, index: T) -> Option<&Self::Output>;
 // }
+
+// impl Get<(usize, usize)> for BaseDataFrame {
+//     type Output = Value;
+
+//     fn get(&self, index: (usize, usize)) -> Option<&Self::Output> {
+//         let index = self.dim.get_value_index(index.0, index.1);
+
+//         self.data.get(index)
+//     }
+// }
+
+// impl Get<usize> for BaseDataFrame {
+//     type Output = Value;
+
+//     fn get(&self, index: usize) -> Option<&Self::Output> {
+//         self.data.get(index)
+//     }
+// }
+
+// // TODO determine if a view/window should be returned vs slice
+// // pub struct View<'a> {
+// //     data: &'a [Value],
+// //     columns: &'a [String],
+// // }
 
 /// Get the row at the specific index, returns an empty slice if index out of bounds
 impl Index<usize> for DataFrame {
@@ -307,83 +184,9 @@ impl Index<usize> for DataFrame {
     fn index(&self, index: usize) -> &[Value] {
         let (start, end) = self.dim.get_row_range(index);
 
-        // return an empty slice if we are trying to access a bucket that is out of bounds
-        if end > self.data.len() {
-            return &[];
-        }
-
         &self.data[start..end]
     }
 }
-
-impl Index<(usize, usize)> for DataFrame {
-    type Output = Value;
-
-    fn index(&self, (row, col): (usize, usize)) -> &Value {
-        &self.data[self.dim.get_value_index(row, col)]
-    }
-}
-
-impl IndexMut<usize> for DataFrame {
-    fn index_mut(&mut self, index: usize) -> &mut [Value] {
-        let (start, end) = self.dim.get_row_range(index);
-
-        if end > self.data.len() {
-            return &mut [];
-        }
-
-        &mut self.data[start..end]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Iter<'a> {
-    ptr: usize,
-    df: &'a DataFrame,
-}
-
-impl<'a> Iter<'a> {
-    pub fn new(df: &'a DataFrame) -> Iter {
-        Iter { ptr: 0, df }
-    }
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = &'a [Value];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = self.df.row(self.ptr);
-        self.ptr += 1;
-        next
-    }
-}
-
-// #[derive(Debug)]
-// pub struct IterMut<'a> {
-//     ptr: usize,
-//     df: &'a mut DataFrame,
-// }
-
-// impl<'a> IterMut<'a> {
-//     pub fn new(df: &'a mut DataFrame) -> IterMut {
-//         IterMut { ptr: 0, df }
-//     }
-// }
-
-// impl<'a> Iterator for IterMut<'a> {
-//     type Item = &'a mut [Value];
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         let next = self.df.row_mut(self.ptr);
-
-//         self.ptr += 1;
-//         next
-//     }
-// }
-// impl IntoIterator for DataFrame {
-//     type Item = Vec<Value>;
-//     type IntoIterator = Iter<'a>
-// }
 
 #[cfg(test)]
 mod tests {
@@ -397,7 +200,6 @@ mod tests {
         );
 
         {
-            let df = df.clone();
             let mut iter = df.iter();
 
             let row = iter.next();
@@ -406,6 +208,7 @@ mod tests {
             assert_eq!(row, [1.into(), 10.into()]);
 
             let row = iter.next();
+
             assert!(row.is_some());
             let row = row.unwrap();
             assert_eq!(row, [2.into(), 20.into()]);
