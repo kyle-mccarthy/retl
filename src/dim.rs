@@ -1,4 +1,6 @@
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct Dim(pub(crate) usize, pub(crate) usize);
 
 impl Default for Dim {

@@ -1,6 +1,8 @@
 pub use failure::ResultExt;
 use failure::{Backtrace, Fail};
 
+// TODO convert to snafu
+
 pub type Result<T> = std::result::Result<T, failure::Error>;
 
 #[derive(Debug)]

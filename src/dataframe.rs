@@ -1,13 +1,16 @@
 use crate::{
     dim::Dim,
     error::{ErrorKind, Result},
+    views::{SubView, View},
     Value,
 };
 
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::iter::Iterator;
+use std::iter::{FromIterator, Iterator};
 use std::ops::Index;
 
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct DataFrame<'a> {
     pub(crate) columns: Cow<'a, [String]>,
     pub(crate) data: Cow<'a, [Value]>,
@@ -25,7 +28,12 @@ impl<'a> std::default::Default for DataFrame<'a> {
 }
 
 impl<'a> DataFrame<'a> {
-    pub fn new<S: Into<String>>(columns: Vec<S>, data: Vec<Vec<Value>>) -> DataFrame<'a> {
+    pub fn new<S>(columns: &[S], data: Vec<Vec<Value>>) -> DataFrame<'a>
+    where
+        S: Into<String> + Clone,
+        [S]: ToOwned,
+        [S]: ToOwned<Owned = Vec<S>>,
+    {
         let dim = Dim::new(columns.len(), data.len());
 
         // TODO ensure that the length of the flattened data is equal the length of the columns *
@@ -33,12 +41,19 @@ impl<'a> DataFrame<'a> {
         let data = data.into_iter().flatten().collect::<Vec<Value>>();
 
         let columns = columns
-            .into_iter()
+            .iter()
+            .cloned()
             .map(Into::<String>::into)
             .collect::<Vec<String>>();
 
+        // let columns = columns
+        //     .to_owned()
+        //     .into_iter()
+        //     .map(Into::<String>::into)
+        //     .collect::<Vec<String>>();
+
         DataFrame {
-            columns: columns.into(),
+            columns: Cow::Owned(columns),
             data: data.into(),
             dim,
             ..Default::default()
@@ -49,12 +64,17 @@ impl<'a> DataFrame<'a> {
         DataFrame::default()
     }
 
-    pub fn with_columns<S: Into<String>>(columns: Vec<S>) -> DataFrame<'a> {
+    pub fn with_columns<S>(columns: &[S]) -> DataFrame<'a>
+    where
+        S: Into<String> + Clone,
+        [S]: ToOwned,
+        [S]: ToOwned<Owned = Vec<S>>,
+    {
         DataFrame::new(columns, vec![])
     }
 
     pub fn iter(&self) -> View<'_, 'a> {
-        View { ptr: 0, df: &self }
+        View::new(&self)
     }
 
     pub fn push_column<S: Into<String>>(&mut self, column: S) {
@@ -204,24 +224,28 @@ impl<'a> DataFrame<'a> {
     }
 }
 
-pub struct View<'a, 'b: 'a> {
-    ptr: usize,
-    df: &'a DataFrame<'b>,
-}
+impl<'a> FromIterator<SubView<'a>> for DataFrame<'a> {
+    fn from_iter<I: IntoIterator<Item = SubView<'a>>>(iter: I) -> Self {
+        let mut view = iter.into_iter();
+        let first = view.next();
 
-impl<'a, 'b> Iterator for View<'a, 'b> {
-    type Item = &'a [Value];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (start, end) = self.df.dim.get_row_range(self.ptr);
-
-        if end > self.df.data.len() {
-            return None;
+        if first.is_none() {
+            return DataFrame::empty();
         }
 
-        self.ptr += 1;
+        let first = first.unwrap();
 
-        Some(&self.df.data[start..end])
+        let mut df = DataFrame::with_columns(&first.columns());
+
+        df.push_row_unchecked(first.data().into_owned());
+
+        let data = view
+            .map(|row| row.data().into_owned())
+            .collect::<Vec<Vec<Value>>>();
+
+        df.extend_unchecked(data);
+
+        df
     }
 }
 
@@ -243,7 +267,7 @@ mod dataframe_tests {
     #[test]
     fn it_iterates() {
         let df = DataFrame::new(
-            vec!["a", "b"],
+            &["a", "b"],
             vec![vec![1.into(), 10.into()], vec![2.into(), 20.into()]],
         );
 
@@ -253,13 +277,13 @@ mod dataframe_tests {
             let row = iter.next();
             assert!(row.is_some());
             let row = row.unwrap();
-            assert_eq!(row, [1.into(), 10.into()]);
+            assert_eq!(row, &[1.into(), 10.into()] as &[Value]);
 
             let row = iter.next();
 
             assert!(row.is_some());
             let row = row.unwrap();
-            assert_eq!(row, [2.into(), 20.into()]);
+            assert_eq!(row, &[2.into(), 20.into()] as &[Value]);
 
             let row = iter.next();
             assert!(row.is_none());
@@ -281,10 +305,7 @@ mod dataframe_tests {
     #[test]
     fn it_pushes_column_and_reshapes_data() {
         // shape (1,2) to (2,2)
-        let mut df = DataFrame::new(
-            vec![String::from("a")],
-            vec![vec![1.into()], vec![2.into()]],
-        );
+        let mut df = DataFrame::new(&[String::from("a")], vec![vec![1.into()], vec![2.into()]]);
 
         assert_eq!(df.shape(), (1, 2));
 
@@ -304,7 +325,7 @@ mod dataframe_tests {
 
     #[test]
     fn it_removes_column_and_reshapes() {
-        let mut df = DataFrame::with_columns(vec!["a", "b"]);
+        let mut df = DataFrame::with_columns(&["a", "b"]);
 
         assert!(df
             .extend(vec![vec![1.into(), 10.into()], vec![2.into(), 20.into()]])
@@ -322,7 +343,7 @@ mod dataframe_tests {
 
     #[test]
     fn it_pushes_data() {
-        let mut df = DataFrame::new(vec!["a"], vec![vec![1.into()]]);
+        let mut df = DataFrame::new(&["a"], vec![vec![1.into()]]);
 
         assert_eq!(df.shape(), (1, 1));
 
@@ -335,6 +356,11 @@ mod dataframe_tests {
 
         // don't push row of incorrect length
         assert!(df.push_row(vec![1.into(), 2.into()]).is_err());
+    }
+
+    #[test]
+    fn it_df_from_iterator() {
+        // let mut df = DataFrame::new(vec!, data: Vec<Vec<Value>>)
     }
 
 }

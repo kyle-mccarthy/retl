@@ -57,7 +57,7 @@ pub trait CsvSource {
         };
 
         // create  the dataframe with the headers
-        let mut df = DataFrame::with_columns(headers);
+        let mut df = DataFrame::with_columns(&headers);
 
         // push data
         df.extend(data)?;
