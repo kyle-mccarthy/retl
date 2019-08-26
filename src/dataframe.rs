@@ -1,44 +1,31 @@
-pub mod base;
-pub mod data;
-pub mod dim;
-pub mod view;
+use crate::{
+    dim::Dim,
+    error::{ErrorKind, Result},
+    Value,
+};
 
-pub use base::BaseDataFrame;
-pub use data::{Container, Data, DataSlice};
-pub use dim::Dim;
-pub use view::View;
-
-use crate::error::{ErrorKind, Result};
-
-use crate::Value;
-use std::iter::FromIterator;
+use std::borrow::Cow;
 use std::iter::Iterator;
 use std::ops::Index;
 
-pub type DataFrame = BaseDataFrame<Data>;
+pub struct DataFrame<'a> {
+    pub(crate) columns: Cow<'a, [String]>,
+    pub(crate) data: Cow<'a, [Value]>,
+    pub(crate) dim: Dim,
+}
 
-impl std::default::Default for DataFrame {
+impl<'a> std::default::Default for DataFrame<'a> {
     fn default() -> Self {
-        BaseDataFrame {
-            columns: vec![],
-            data: vec![],
-            ptr: 0,
+        DataFrame {
+            columns: Cow::from(vec![]),
+            data: Cow::from(vec![]),
             dim: Dim::default(),
         }
     }
 }
 
-impl DataFrame {
-    pub(crate) fn from_view(view: View) -> Self {
-        DataFrame {
-            columns: view.columns,
-            data: view.data.to_owned(),
-            dim: view.dim,
-            ptr: 0,
-        }
-    }
-
-    pub fn new<S: Into<String>>(columns: Vec<S>, data: Vec<Vec<Value>>) -> DataFrame {
+impl<'a> DataFrame<'a> {
+    pub fn new<S: Into<String>>(columns: Vec<S>, data: Vec<Vec<Value>>) -> DataFrame<'a> {
         let dim = Dim::new(columns.len(), data.len());
 
         // TODO ensure that the length of the flattened data is equal the length of the columns *
@@ -50,16 +37,28 @@ impl DataFrame {
             .map(Into::<String>::into)
             .collect::<Vec<String>>();
 
-        BaseDataFrame {
-            columns,
-            data,
+        DataFrame {
+            columns: columns.into(),
+            data: data.into(),
             dim,
             ..Default::default()
         }
     }
 
+    pub fn empty() -> DataFrame<'a> {
+        DataFrame::default()
+    }
+
+    pub fn with_columns<S: Into<String>>(columns: Vec<S>) -> DataFrame<'a> {
+        DataFrame::new(columns, vec![])
+    }
+
+    pub fn iter(&self) -> View<'_, 'a> {
+        View { ptr: 0, df: &self }
+    }
+
     pub fn push_column<S: Into<String>>(&mut self, column: S) {
-        self.columns.push(column.into());
+        self.columns.to_mut().push(column.into());
         self.dim.0 += 1;
 
         let col_count = self.dim.0;
@@ -71,9 +70,9 @@ impl DataFrame {
             // insert NULL into the new column for each row at the index. If the index exceeds the
             // current length, push the value;
             if index > self.data.len() {
-                self.data.push(Value::Null);
+                self.data.to_mut().push(Value::Null);
             } else {
-                self.data.insert(index, Value::Null);
+                self.data.to_mut().insert(index, Value::Null);
             }
         }
     }
@@ -87,11 +86,11 @@ impl DataFrame {
         // being removed
         for row_num in (0..self.dim.1).rev() {
             let index = self.dim.get_value_index(row_num, column);
-            self.data.remove(index);
+            self.data.to_mut().remove(index);
         }
 
         self.dim.0 -= 1;
-        self.columns.remove(column);
+        self.columns.to_mut().remove(column);
 
         Ok(())
     }
@@ -109,7 +108,7 @@ impl DataFrame {
     }
 
     pub fn push_row_unchecked(&mut self, data: Vec<Value>) {
-        self.data.extend(data);
+        self.data.to_mut().extend(data);
         self.dim.1 += 1;
     }
 
@@ -132,53 +131,102 @@ impl DataFrame {
     pub fn extend_unchecked(&mut self, data: Vec<Vec<Value>>) {
         self.dim.1 += data.len();
         self.data
+            .to_mut()
             .extend(data.into_iter().flatten().collect::<Vec<Value>>());
     }
 
+    pub fn columns(&self) -> &[String] {
+        &self.columns
+    }
+
+    pub fn size(&self) -> usize {
+        self.dim.1
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.dim.shape()
+    }
+
+    pub fn row(&self, row: usize) -> Option<&[Value]> {
+        let (start, end) = self.dim.get_row_range(row);
+
+        if self.data.len() < end {
+            return None;
+        }
+
+        Some(&self.data.as_ref()[start..end])
+    }
+
+    pub fn rows(&self) -> usize {
+        self.dim.1
+    }
+
+    /// Print the data frame to std out for debugging
+    /// You can limit the number of rows shown with  the num_rows parameter. Will print at most
+    /// num_rows, 0 prints all rows.
+    pub fn debug(&self, num_rows: usize) {
+        use prettytable::{format::Alignment, Cell, Row, Table};
+
+        let mut table = Table::new();
+
+        let mut row = Row::empty();
+        for c in self.columns() {
+            row.add_cell(Cell::new(&c));
+        }
+        table.add_row(row);
+
+        for (n, record) in self.iter().enumerate() {
+            let mut row = Row::empty();
+
+            for c in record.iter() {
+                row.add_cell(Cell::new(c.to_string().as_str()));
+            }
+
+            table.add_row(row);
+
+            if n + 1 == num_rows {
+                let (_, width) = self.shape();
+                table.add_row(Row::new(vec![
+                    Cell::new_align("...", Alignment::CENTER).with_hspan(width)
+                ]));
+                break;
+            }
+        }
+
+        table.printstd();
+    }
+
     pub fn clear(&mut self) {
-        self.columns.clear();
-        self.data.clear();
+        self.columns.to_mut().clear();
+        self.data.to_mut().clear();
+        self.dim.0 = 0;
+        self.dim.1 = 0;
     }
 }
 
-impl<'a> FromIterator<View<'a>> for DataFrame {
-    fn from_iter(view: View<'a>) -> DataFrame {
-        view.to_df()
-    }
+pub struct View<'a, 'b: 'a> {
+    ptr: usize,
+    df: &'a DataFrame<'b>,
 }
 
-// pub trait Get<T> {
-//     type Output;
+impl<'a, 'b> Iterator for View<'a, 'b> {
+    type Item = &'a [Value];
 
-//     fn get(&self, index: T) -> Option<&Self::Output>;
-// }
+    fn next(&mut self) -> Option<Self::Item> {
+        let (start, end) = self.df.dim.get_row_range(self.ptr);
 
-// impl Get<(usize, usize)> for BaseDataFrame {
-//     type Output = Value;
+        if end > self.df.data.len() {
+            return None;
+        }
 
-//     fn get(&self, index: (usize, usize)) -> Option<&Self::Output> {
-//         let index = self.dim.get_value_index(index.0, index.1);
+        self.ptr += 1;
 
-//         self.data.get(index)
-//     }
-// }
-
-// impl Get<usize> for BaseDataFrame {
-//     type Output = Value;
-
-//     fn get(&self, index: usize) -> Option<&Self::Output> {
-//         self.data.get(index)
-//     }
-// }
-
-// // TODO determine if a view/window should be returned vs slice
-// // pub struct View<'a> {
-// //     data: &'a [Value],
-// //     columns: &'a [String],
-// // }
+        Some(&self.df.data[start..end])
+    }
+}
 
 /// Get the row at the specific index, returns an empty slice if index out of bounds
-impl Index<usize> for DataFrame {
+impl<'a> Index<usize> for DataFrame<'a> {
     type Output = [Value];
 
     fn index(&self, index: usize) -> &[Value] {
@@ -189,7 +237,7 @@ impl Index<usize> for DataFrame {
 }
 
 #[cfg(test)]
-mod tests {
+mod dataframe_tests {
     use super::*;
 
     #[test]
@@ -218,13 +266,6 @@ mod tests {
         }
 
         assert_eq!(df.shape(), (2, 2));
-
-        {
-            //let df2 = df.iter_mut().map(|record| {
-            //    //record[0] *= 2;
-            //    record
-            //});
-        }
     }
 
     #[test]
@@ -273,7 +314,7 @@ mod tests {
         assert!(df.remove_column(0).is_ok());
         assert_eq!(df.shape(), (1, 2));
 
-        assert_eq!(df.columns(), &vec![String::from("b")]);
+        assert_eq!(df.columns(), [String::from("b")]);
 
         assert_eq!(df[0], [10.into()]);
         assert_eq!(df[1], [20.into()]);

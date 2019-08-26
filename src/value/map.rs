@@ -6,7 +6,7 @@ use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops::{Deref, Index, IndexMut};
 
-#[derive(Debug, Serialize, Deserialize, Hash, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct Map {
     inner: BTreeMap<String, Value>,
 }

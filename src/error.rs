@@ -45,6 +45,9 @@ pub enum ErrorKind {
 
     #[fail(display = "The index is out of bounds (idx {}, len {})", _0, _1)]
     IndexOutofBounds(usize, usize),
+
+    #[fail(display = "Failed to convert the float into a decimal type")]
+    FloatConversion(),
 }
 
 #[derive(Debug)]

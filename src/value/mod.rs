@@ -1,16 +1,14 @@
 pub mod map;
 pub mod number;
 
-use crate::error::{self as error, ResultExt};
 use chrono::NaiveDateTime;
 use map::Map;
 use number::Number;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::convert::{From, TryInto};
+use std::convert::From;
 use std::ops::{Deref, Index};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -20,27 +18,6 @@ pub enum Value {
     Number(Number),
     Date(NaiveDateTime),
     Binary(Vec<u8>),
-}
-
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Value) -> Option<Ordering> {
-        match (&self, &other) {
-            (Value::Null, Value::Null) => Some(Ordering::Equal),
-            (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
-            (Value::Number(a), Value::Number(b)) => a.partial_cmp(b),
-            (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
-            (Value::Date(a), Value::Date(b)) => Some(a.cmp(b)),
-            (Value::Array(a), Value::Array(b)) => a.partial_cmp(b),
-            (Value::Binary(a), Value::Binary(b)) => a.partial_cmp(b),
-            _ => None,
-        }
-    }
-}
-
-impl<T: Into<Number>> From<T> for Value {
-    fn from(n: T) -> Self {
-        Value::Number(n.into())
-    }
 }
 
 impl From<bool> for Value {
@@ -61,17 +38,11 @@ impl<'a> From<&'a str> for Value {
     }
 }
 
-impl From<Vec<Value>> for Value {
-    fn from(v: Vec<Value>) -> Value {
-        Value::Array(v)
-    }
-}
-
-impl From<Vec<u8>> for Value {
-    fn from(v: Vec<u8>) -> Value {
-        Value::Binary(v)
-    }
-}
+// impl From<Vec<u8>> for Value {
+//     fn from(v: Vec<u8>) -> Value {
+//         Value::Binary(v)
+//     }
+// }
 
 impl Into<String> for Value {
     fn into(self) -> String {
@@ -79,47 +50,47 @@ impl Into<String> for Value {
     }
 }
 
-impl Into<String> for &Value {
-    fn into(self) -> String {
-        format!("{}", self)
+impl<N: Into<Number>> From<N> for Value {
+    fn from(n: N) -> Value {
+        Value::Number(n.into())
     }
 }
 
-impl TryInto<Vec<u8>> for &Value {
-    type Error = error::Error;
-
-    fn try_into(self) -> std::result::Result<Vec<u8>, Self::Error> {
-        bincode::serialize(self)
-            .context(error::ErrorKind::Serialize)
-            .map_err(Into::<error::Error>::into)
+impl<T: Into<Value>> From<Vec<T>> for Value {
+    fn from(s: Vec<T>) -> Self {
+        Value::Array(s.into_iter().map(Into::into).collect())
     }
 }
 
-impl<'a, T: Clone + Into<Value>> From<&'a [T]> for Value
-where
-    number::Integer: std::convert::From<&'a T>,
-    number::Number: std::convert::From<&'a T>,
-{
+impl<'a, T: Clone + Into<Value>> From<&'a [T]> for Value {
     fn from(s: &'a [T]) -> Self {
-        Value::Array(s.iter().clone().map(Into::into).collect())
+        Value::Array(s.iter().cloned().map(Into::into).collect())
     }
 }
 
-impl PartialEq for Value {
-    fn eq(&self, other: &Value) -> bool {
-        match (&self, &other) {
-            (&Value::Null, &Value::Null) => true,
-            (&Value::Bool(a), &Value::Bool(b)) => a == b,
-            (&Value::String(a), &Value::String(b)) => a == b,
-            (&Value::Number(a), &Value::Number(b)) => a == b,
-            (&Value::Array(a), &Value::Array(b)) => a == b,
-            (&Value::Map(a), &Value::Map(b)) => a == b,
-            (&Value::Date(a), &Value::Date(b)) => a == b,
-            (&Value::Binary(a), &Value::Binary(b)) => a == b,
-            _ => false,
-        }
+impl<T: Into<Value>> std::iter::FromIterator<T> for Value {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Value::Array(iter.into_iter().map(Into::into).collect())
     }
 }
+
+// impl PartialEq for Value {
+//     fn eq(&self, other: &Value) -> bool {
+//         match (&self, &other) {
+//             (&Value::Null, &Value::Null) => true,
+//             (&Value::Bool(a), &Value::Bool(b)) => a == b,
+//             (&Value::String(a), &Value::String(b)) => a == b,
+//             (&Value::Number(a), &Value::Number(b)) => a == b,
+//             (&Value::Array(a), &Value::Array(b)) => a == b,
+//             (&Value::Map(a), &Value::Map(b)) => a == b,
+//             (&Value::Date(a), &Value::Date(b)) => a == b,
+//             (&Value::Binary(a), &Value::Binary(b)) => a == b,
+//             _ => false,
+//         }
+//     }
+// }
+
+// TODO impl Display for <Vec> Value
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {

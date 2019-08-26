@@ -5,7 +5,7 @@ pub trait CsvDestination {
     fn to_csv(&self) -> Result<()>;
 }
 
-impl CsvDestination for DataFrame {
+impl<'a> CsvDestination for DataFrame<'a> {
     fn to_csv(&self) -> Result<()> {
         // TODO update to write somewhere other than stdout
         let mut writer = csv::Writer::from_writer(std::io::stdout());
@@ -18,7 +18,7 @@ impl CsvDestination for DataFrame {
 
         for row in self.iter() {
             for val in row.iter() {
-                let str_val: String = val.into();
+                let str_val: String = val.clone().into();
                 writer.write_field(str_val).context(ErrorKind::CsvError)?;
             }
             writer

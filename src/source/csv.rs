@@ -10,11 +10,11 @@ pub trait CsvSource {
         Self::read_csv(reader)
     }
 
-    fn from_reader<R: std::io::Read>(reader: R) -> Result<DataFrame> {
+    fn from_reader<'a, R: std::io::Read>(reader: R) -> Result<DataFrame<'a>> {
         Self::read_csv(csv::Reader::from_reader(reader))
     }
 
-    fn read_csv<R: std::io::Read>(mut reader: csv::Reader<R>) -> Result<DataFrame> {
+    fn read_csv<'a, R: std::io::Read>(mut reader: csv::Reader<R>) -> Result<DataFrame<'a>> {
         // convert all the records into vectors of values
         let data = reader
             .records()
@@ -66,7 +66,7 @@ pub trait CsvSource {
     }
 }
 
-impl CsvSource for DataFrame {}
+impl<'a> CsvSource for DataFrame<'a> {}
 
 /// Converts errors from the csv module into Error which can be generalized to fail
 impl std::convert::From<csv::Error> for Error {
@@ -101,7 +101,7 @@ mod test {
 
         let cols = df.columns();
 
-        assert_eq!(*cols, vec!["a", "b", "c"]);
+        assert_eq!(*cols, ["a", "b", "c"]);
         assert_eq!(df.size(), 2);
         assert_eq!(df[0], ["1".into(), "2".into(), "3".into()]);
         assert_eq!(df[1], ["4".into(), "5".into(), "6".into()]);

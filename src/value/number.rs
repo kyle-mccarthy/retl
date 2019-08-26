@@ -1,159 +1,104 @@
-use crate::error::{self as error, ResultExt};
+use crate::error::{self as error, ErrorKind};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::convert::{From, TryInto};
+use std::convert::From;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-pub enum Integer {
-    Negative(i64),
-    Positive(u64),
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+pub enum Num {
+    Uint8(u8),
+    Int8(i8),
+
+    Uint16(u16),
+    Int16(i16),
+
+    Uint32(u32),
+    Int32(i32),
+
+    Uint64(u64),
+    Int64(i64),
+
+    HalfFloat(f32),
+    Float(f64),
+    Double(Decimal),
 }
 
-impl PartialEq for Integer {
-    fn eq(&self, other: &Integer) -> bool {
-        match (&self, &other) {
-            (Integer::Positive(a), Integer::Positive(b)) => a == b,
-            (Integer::Negative(a), Integer::Negative(b)) => a == b,
-            _ => false,
-        }
+impl From<u8> for Num {
+    fn from(int: u8) -> Num {
+        Num::Uint8(int)
     }
 }
 
-impl PartialOrd for Integer {
-    fn partial_cmp(&self, rhs: &Integer) -> Option<std::cmp::Ordering> {
-        Some(match (&self, &rhs) {
-            (Integer::Positive(a), Integer::Positive(b)) => a.cmp(b),
-            (Integer::Negative(a), Integer::Negative(b)) => a.cmp(b),
-            (Integer::Positive(_), _) => Ordering::Greater,
-            (Integer::Negative(_), _) => Ordering::Less,
-        })
+impl From<i8> for Num {
+    fn from(int: i8) -> Num {
+        Num::Int8(int)
     }
 }
 
-impl std::fmt::Display for Integer {
+impl From<u16> for Num {
+    fn from(int: u16) -> Num {
+        Num::Uint16(int)
+    }
+}
+
+impl From<i16> for Num {
+    fn from(int: i16) -> Num {
+        Num::Int16(int)
+    }
+}
+
+impl From<u32> for Num {
+    fn from(int: u32) -> Num {
+        Num::Uint32(int)
+    }
+}
+
+impl From<i32> for Num {
+    fn from(int: i32) -> Num {
+        Num::Int32(int)
+    }
+}
+
+impl From<u64> for Num {
+    fn from(int: u64) -> Num {
+        Num::Uint64(int)
+    }
+}
+
+impl From<i64> for Num {
+    fn from(int: i64) -> Num {
+        Num::Int64(int)
+    }
+}
+
+impl From<f32> for Num {
+    fn from(f: f32) -> Num {
+        Num::HalfFloat(f)
+    }
+}
+
+impl From<f64> for Num {
+    fn from(f: f64) -> Num {
+        Num::Float(f)
+    }
+}
+
+impl std::fmt::Display for Num {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        match &self {
-            Integer::Positive(n) => write!(f, "{}", n),
-            Integer::Negative(n) => write!(f, "{}", n),
-        }
+        f.write_str(&format!("{}", self))
     }
 }
 
-macro_rules! integer_from_unsigned {
-    (
-        $($ty:ty), *
-    ) => {
-        $(
-            impl From<$ty> for Integer {
-                fn from(i: $ty) -> Self {
-                    Integer::Positive(i as u64)
-                }
-            }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+pub struct Number(pub(crate) Num);
 
-            // impl<'a> From<&'a $ty> for Integer {
-            //     fn from(i: &'a $ty) -> Self {
-            //         Integer::Positive(i.clone() as u64)
-            //     }
-            // }
-
-        )*
-    }
-}
-
-macro_rules! integer_from_signed {
-    (
-        $($ty:ty), *
-     ) => {
-        $(
-            impl From<$ty> for Integer {
-                fn from(i: $ty) -> Self {
-                    if i > 0 {
-                        Integer::Positive(i as u64)
-                    } else {
-                        Integer::Negative(i as i64)
-                    }
-                }
-            }
-
-         // impl<'a> From<&'a $ty> for Integer {
-         //        fn from(i: &'a $ty) -> Self {
-         //            if *i > 0 {
-         //                Integer::Positive(i.clone() as u64)
-         //            } else {
-         //                Integer::Negative(i.clone() as i64)
-         //            }
-         //        }
-         //    }
-
-        )*
-    }
-}
-
-integer_from_unsigned!(u8, u16, u32, u64, usize);
-integer_from_signed!(i8, i16, i32, i64, isize);
-
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-pub enum Number {
-    Integer(Integer),
-    Decimal(Decimal),
-}
-
-impl PartialEq for Number {
-    fn eq(&self, other: &Number) -> bool {
-        match (&self, &other) {
-            (Number::Integer(a), Number::Integer(b)) => a == b,
-            (Number::Decimal(a), Number::Decimal(b)) => a == b,
-            _ => false, // can't really compare floats and ints -- should never actually happen though since each column should have same data type
-        }
-    }
-}
-
-impl PartialOrd for Number {
-    fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
-        match (&self, &other) {
-            (Number::Integer(a), Number::Integer(b)) => a.partial_cmp(&b),
-            (Number::Decimal(a), Number::Decimal(b)) => a.partial_cmp(&b),
-            _ => None,
-        }
+impl<N: Into<Num>> From<N> for Number {
+    fn from(n: N) -> Number {
+        Number(n.into())
     }
 }
 
 impl std::fmt::Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        match self {
-            Number::Integer(i) => write!(f, "{}", i),
-            Number::Decimal(d) => write!(f, "{}", d),
-        }
+        f.write_str(&format!("{}", self.0))
     }
 }
-
-impl<T: Into<Integer>> From<T> for Number {
-    fn from(i: T) -> Self {
-        Number::Integer(i.into())
-    }
-}
-
-// impl<'a, T: Into<Integer>> From<&'a T> for &'a Number
-// where
-//     Integer: std::convert::From<&'a T>,
-// {
-//     fn from(i: &'a T) -> Self {
-//         Number::Integer(i.into())
-//     }
-// }
-
-// impl<'a, T: Into<Number>> From<&T> for Number {
-//     fn from(i: &T) -> Self {
-//         i.into()
-//     }
-// }
-
-// impl<T> From<T> for Number
-// where
-//     Number: From<T>,
-// {
-//     fn from(i: T) -> Self {
-//         i.into()
-//     }
-// }
