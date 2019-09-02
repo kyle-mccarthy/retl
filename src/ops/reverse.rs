@@ -1,7 +1,5 @@
 use crate::DataFrame;
 
 pub trait Reverse {
-    fn reverse(df: DataFrame) -> DataFrame {
-        
-    }
+    fn reverse(df: DataFrame) -> DataFrame {}
 }

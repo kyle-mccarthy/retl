@@ -1,6 +1,7 @@
 use crate::{
     dim::Dim,
-    error::{ErrorKind, Result},
+    error::{Error, Result},
+    schema::Schema,
     views::{SubView, View},
     Value,
 };
@@ -15,6 +16,7 @@ pub struct DataFrame<'a> {
     pub(crate) columns: Cow<'a, [String]>,
     pub(crate) data: Cow<'a, [Value]>,
     pub(crate) dim: Dim,
+    pub(crate) schema: Schema,
 }
 
 impl<'a> std::default::Default for DataFrame<'a> {
@@ -23,6 +25,7 @@ impl<'a> std::default::Default for DataFrame<'a> {
             columns: Cow::from(vec![]),
             data: Cow::from(vec![]),
             dim: Dim::default(),
+            schema: Schema::default(),
         }
     }
 }
@@ -46,16 +49,17 @@ impl<'a> DataFrame<'a> {
             .map(Into::<String>::into)
             .collect::<Vec<String>>();
 
-        // let columns = columns
-        //     .to_owned()
-        //     .into_iter()
-        //     .map(Into::<String>::into)
-        //     .collect::<Vec<String>>();
+        let mut schema = Schema::default();
+
+        columns.iter().for_each(|col| schema.add_field(col));
+
+        dbg!(&schema);
 
         DataFrame {
             columns: Cow::Owned(columns),
             data: data.into(),
             dim,
+            schema,
             ..Default::default()
         }
     }
@@ -78,7 +82,9 @@ impl<'a> DataFrame<'a> {
     }
 
     pub fn push_column<S: Into<String>>(&mut self, column: S) {
-        self.columns.to_mut().push(column.into());
+        let name = column.into();
+        self.schema.add_field(&name);
+        self.columns.to_mut().push(name);
         self.dim.0 += 1;
 
         let col_count = self.dim.0;
@@ -99,7 +105,10 @@ impl<'a> DataFrame<'a> {
 
     pub fn remove_column(&mut self, column: usize) -> Result<()> {
         if column >= self.columns.len() {
-            return Err(ErrorKind::IndexOutofBounds(column, self.columns.len()).into());
+            return Err(Error::IndexOutOfBounds {
+                index: column,
+                length: self.columns.len(),
+            });
         }
 
         // starting from the end of our value buffer delete elements for associated with the index
@@ -119,7 +128,10 @@ impl<'a> DataFrame<'a> {
     /// columns
     pub fn push_row(&mut self, data: Vec<Value>) -> Result<usize> {
         if data.len() != self.dim.0 {
-            return Err(ErrorKind::InvalidDataLength(self.dim.0, data.len()).into());
+            return Err(Error::InvalidDataLength {
+                expected: self.dim.0,
+                actual: data.len(),
+            });
         }
 
         self.push_row_unchecked(data);
@@ -138,9 +150,10 @@ impl<'a> DataFrame<'a> {
         let len_check = data.iter().find(|r| r.len() != self.dim.0);
 
         match len_check {
-            Some(invalid_row) => {
-                Err(ErrorKind::InvalidDataLength(self.dim.0, invalid_row.len()).into())
-            }
+            Some(invalid_row) => Err(Error::InvalidDataLength {
+                expected: self.dim.0,
+                actual: invalid_row.len(),
+            }),
             _ => {
                 self.extend_unchecked(data);
                 Ok(self.dim.1)
@@ -189,11 +202,16 @@ impl<'a> DataFrame<'a> {
 
         let mut table = Table::new();
 
+        let mut type_row = Row::empty();
         let mut row = Row::empty();
         for c in self.columns() {
             row.add_cell(Cell::new(&c));
+            type_row.add_cell(Cell::new(
+                self.schema.get_field(&c).map_or("?", |f| &f.dtype.as_str()),
+            ));
         }
         table.add_row(row);
+        table.add_row(type_row);
 
         for (n, record) in self.iter().enumerate() {
             let mut row = Row::empty();

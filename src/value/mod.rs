@@ -1,9 +1,11 @@
 pub mod map;
 pub mod number;
 
-use chrono::NaiveDateTime;
+use crate::{schema::DataType, traits::TypeOf};
 use map::Map;
 use number::Number;
+
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use std::convert::From;
 use std::ops::{Deref, Index};
@@ -18,6 +20,21 @@ pub enum Value {
     Number(Number),
     Date(NaiveDateTime),
     Binary(Vec<u8>),
+}
+
+impl TypeOf for Value {
+    fn type_of(&self) -> DataType {
+        match self {
+            Value::Bool(_) => DataType::Bool,
+            Value::String(_) => DataType::String,
+            Value::Array(_) => DataType::Array,
+            Value::Map(_) => DataType::Map,
+            Value::Number(n) => n.type_of(),
+            Value::Date(_) => DataType::Date,
+            Value::Binary(_) => DataType::Binary,
+            _ => DataType::Any,
+        }
+    }
 }
 
 impl From<bool> for Value {

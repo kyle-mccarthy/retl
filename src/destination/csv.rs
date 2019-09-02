@@ -1,5 +1,19 @@
-use crate::error::{ErrorKind, Result, ResultExt};
 use crate::DataFrame;
+use snafu::{ResultExt, Snafu};
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("Failed to write the row: {}", source))]
+    WriteRecordError { source: csv::Error },
+
+    #[snafu(display("Failed to write the field: {}", source))]
+    WriteFieldError { source: csv::Error },
+
+    #[snafu(display("Failed while writing buffer to writer: {}", source))]
+    FlushError { source: std::io::Error },
+}
+
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub trait CsvDestination {
     fn to_csv(&self) -> Result<()>;
@@ -14,19 +28,19 @@ impl<'a> CsvDestination for DataFrame<'a> {
 
         writer
             .write_record(self.columns())
-            .context(ErrorKind::CsvError)?;
+            .context(WriteRecordError)?;
 
         for row in self.iter() {
             for val in row.iter() {
                 let str_val: String = val.clone().into();
-                writer.write_field(str_val).context(ErrorKind::CsvError)?;
+                writer.write_field(str_val).context(WriteFieldError)?;
             }
             writer
                 .write_record(None::<&[u8]>)
-                .context(ErrorKind::CsvError)?;
+                .context(WriteRecordError)?;
         }
 
-        writer.flush().context(ErrorKind::CsvError)?;
+        writer.flush().context(FlushError)?;
 
         Ok(())
     }
@@ -39,7 +53,7 @@ mod tests {
 
     #[test]
     fn it_df_to_csv() {
-        let mut df = DataFrame::with_columns(vec!["a", "b", "c"]);
+        let mut df = DataFrame::with_columns(&["a", "b", "c"]);
 
         df.push_row(vec!["x".into(), 1.into(), true.into()] as Vec<Value>)
             .unwrap();

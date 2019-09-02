@@ -4,6 +4,7 @@ pub mod destination;
 pub mod dim;
 pub mod error;
 pub mod ops;
+pub mod schema;
 pub mod source;
 pub mod traits;
 pub mod value;
@@ -12,3 +13,5 @@ pub mod views;
 pub use dataframe::DataFrame;
 pub use traits::Get;
 pub use value::Value;
+
+pub(crate) use value::number::{Num, Number};

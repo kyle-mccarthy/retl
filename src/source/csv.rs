@@ -1,12 +1,21 @@
-use crate::error::{Error, ErrorKind, Result, ResultExt};
 use crate::value::Value;
 use crate::DataFrame;
+use snafu::{ResultExt, Snafu};
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("Failed to read csv: {}", source))]
+    ReadError { source: csv::Error },
+
+    #[snafu(display("Failed to perform operation on dataframe: {}", source))]
+    OperationError { source: crate::error::Error },
+}
+
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub trait CsvSource {
     fn from_path(path: &str) -> Result<DataFrame> {
-        let reader: csv::Reader<std::fs::File> =
-            csv::Reader::from_path(path).context(ErrorKind::CsvError)?;
-
+        let reader: csv::Reader<std::fs::File> = csv::Reader::from_path(path).context(ReadError)?;
         Self::read_csv(reader)
     }
 
@@ -60,34 +69,13 @@ pub trait CsvSource {
         let mut df = DataFrame::with_columns(&headers);
 
         // push data
-        df.extend(data)?;
+        df.extend(data).context(OperationError)?;
 
         Ok(df)
     }
 }
 
 impl<'a> CsvSource for DataFrame<'a> {}
-
-/// Converts errors from the csv module into Error which can be generalized to fail
-impl std::convert::From<csv::Error> for Error {
-    fn from(e: csv::Error) -> Self {
-        use csv::ErrorKind as CsvErrorKind;
-        (match e.kind() {
-            CsvErrorKind::Io(_) => ErrorKind::Io,
-            CsvErrorKind::Utf8 { pos: _, err: _ } => ErrorKind::Utf8,
-            CsvErrorKind::Deserialize { pos: _, err: _ } => ErrorKind::Deserialize,
-            CsvErrorKind::Serialize(_) => ErrorKind::Serialize,
-            CsvErrorKind::UnequalLengths {
-                pos: _,
-                expected_len: _,
-                len: _,
-            } => ErrorKind::CsvError,
-            CsvErrorKind::Seek => ErrorKind::CsvError,
-            _ => ErrorKind::UnknownError,
-        })
-        .into()
-    }
-}
 
 #[cfg(test)]
 mod test {
