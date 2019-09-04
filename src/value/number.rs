@@ -1,18 +1,22 @@
 use crate::{schema::DataType, traits::TypeOf};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use snafu::{ResultExt, Snafu};
+use snafu::{IntoError, Snafu};
 use std::convert::{From, Into, TryInto};
 use std::error::Error as ErrorTrait;
+use std::str::FromStr;
 
 use std::ops::Add as AddTrait;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
     Infallible,
+
     CastError {
         description: String,
     },
+
+    #[snafu(display("Cannot convert this datatype into desired type"))]
     IllegalConversion,
 
     #[snafu(display("Cannot perform this operation on numbers of two different types"))]
@@ -20,6 +24,29 @@ pub enum Error {
 
     #[snafu(display("Failed to perform the operation, result may have under or overflowed"))]
     OpFailed,
+
+    #[snafu(display("Failed to parse the string to a numeric type"))]
+    ParseStringError {
+        string_source: String,
+        destination_type: DataType,
+    },
+
+    #[snafu(display("Failed to parse string to integer value"))]
+    ParseIntError {
+        source: std::num::ParseIntError,
+        from_str: String,
+    },
+
+    #[snafu(display("Failed to parse string to floating point value"))]
+    ParseFloatError {
+        source: std::num::ParseFloatError,
+        from_str: String,
+    },
+
+    #[snafu(display("Attempted to use non numeric data type as numeric"))]
+    InvalidDataType {
+        datatype: DataType,
+    },
 }
 
 impl From<std::convert::Infallible> for Error {
@@ -118,6 +145,45 @@ macro_rules! cast_num {
     }};
 }
 
+macro_rules! impl_is_type {
+    ($func:ident, $func2:ident, $is:path) => {
+        impl_is_type!($func, $is);
+
+        /// Is an alias for self.$func()
+        pub fn $func2(&self) -> bool {
+            self.$func()
+        }
+    };
+    ($func:ident, $is:path) => {
+        pub fn $func(&self) -> bool {
+            match self.0 {
+                $is(_) => true,
+                _ => false
+            }
+        }
+    }
+}
+
+macro_rules! impl_as_primative {
+    ($func:ident, $type:ty) => {
+        pub fn $func(&self) -> $type {
+            match self.0 {
+                Num::Uint8(n) => n as $type,
+                Num::Uint16(n) => n as $type,
+                Num::Uint32(n) => n as $type,
+                Num::Uint64(n) => n as $type,
+                Num::Int8(n) => n as $type,
+                Num::Int16(n) => n as $type,
+                Num::Int32(n) => n as $type,
+                Num::Int64(n) => n as $type,
+                Num::Float(n) => n as $type,
+                Num::Double(n) => n as $type,
+                Num::Decimal(_) => 0 as $type,
+            }
+        }
+    }
+}
+
 macro_rules! impl_cast_num {
     ($func:ident, $into:ty) => {
         pub fn $func(self) -> Result<Number, Error> {
@@ -134,6 +200,35 @@ macro_rules! impl_from_primative {
                 $num(val)
             }
         }
+    };
+}
+
+macro_rules! impl_primative_partial_eq {
+    ($prim:ty, $num:path) => {
+        impl PartialEq<$prim> for Num {
+            fn eq(&self, lhs: &$prim) -> bool {
+                match self {
+                    $num(n) => lhs == n,
+                    _ => false,
+                }
+            }
+        }
+
+        impl PartialEq<$prim> for &Num {
+            fn eq(&self, lhs: &$prim) -> bool {
+                match self {
+                    $num(n) => lhs == n,
+                    _ => false,
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_traits {
+    ($prim:ty, $num:path) => {
+        impl_from_primative!($prim, $num);
+        impl_primative_partial_eq!($prim, $num);
     };
 }
 
@@ -155,18 +250,48 @@ impl TypeOf for Num {
     }
 }
 
-impl_from_primative!(u8, Num::Uint8);
-impl_from_primative!(u16, Num::Uint16);
-impl_from_primative!(u32, Num::Uint32);
-impl_from_primative!(u64, Num::Uint64);
+impl Num {
+    pub fn to_string(&self) -> String {
+        match self {
+            Num::Uint8(n) => n.to_string(),
+            Num::Uint16(n) => n.to_string(),
+            Num::Uint32(n) => n.to_string(),
+            Num::Uint64(n) => n.to_string(),
+            Num::Int8(n) => n.to_string(),
+            Num::Int16(n) => n.to_string(),
+            Num::Int32(n) => n.to_string(),
+            Num::Int64(n) => n.to_string(),
+            Num::Float(n) => n.to_string(),
+            Num::Double(n) => n.to_string(),
+            Num::Decimal(n) => n.to_string(),
+        }
+    }
+}
 
-impl_from_primative!(i8, Num::Int8);
-impl_from_primative!(i16, Num::Int16);
-impl_from_primative!(i32, Num::Int32);
-impl_from_primative!(i64, Num::Int64);
+impl_traits!(u8, Num::Uint8);
+impl_traits!(u16, Num::Uint16);
+impl_traits!(u32, Num::Uint32);
+impl_traits!(u64, Num::Uint64);
 
-impl_from_primative!(f32, Num::Float);
-impl_from_primative!(f64, Num::Double);
+impl_traits!(i8, Num::Int8);
+impl_traits!(i16, Num::Int16);
+impl_traits!(i32, Num::Int32);
+impl_traits!(i64, Num::Int64);
+
+impl_traits!(f32, Num::Float);
+impl_traits!(f64, Num::Double);
+
+macro_rules! try_from_str {
+    ($prim:ty, $num:path, $var:ident, $err_type:ident) => {{
+        match <$prim>::from_str($var) {
+            Ok(int) => Ok(Number($num(int))),
+            Err(source) => Err($err_type {
+                from_str: $var.to_string(),
+            }
+            .into_error(source)),
+        }
+    }};
+}
 
 impl std::fmt::Display for Num {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
@@ -191,7 +316,7 @@ impl<N: Into<Num>> From<N> for Number {
 
 impl std::fmt::Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        f.write_str(&format!("{}", self.0))
+        f.write_str(&self.to_string())
     }
 }
 
@@ -206,10 +331,129 @@ impl Number {
     impl_cast_num!(into_int32, i32);
     impl_cast_num!(into_int64, i64);
 
+    pub fn into_float(self) -> Result<Number, Error> {
+        use rust_decimal::prelude::ToPrimitive;
+
+        match self.0 {
+            Num::Uint8(n) => Ok(f32::from(n)),
+            Num::Uint16(n) => Ok(f32::from(n)),
+            Num::Int8(n) => Ok(f32::from(n)),
+            Num::Int16(n) => Ok(f32::from(n)),
+            Num::Float(n) => Ok(n),
+
+            Num::Decimal(n) => n.to_f32().ok_or(Error::CastError {
+                description: "Failed to cast f32 into decimal datatype".to_string(),
+            }),
+
+            _ => Err(Error::IllegalConversion),
+        }
+        .map(|n| Number(Num::Float(n)))
+    }
+
+    pub fn into_double(self) -> Result<Number, Error> {
+        use rust_decimal::prelude::ToPrimitive;
+
+        match self.0 {
+            Num::Uint8(n) => Ok(f64::from(n)),
+            Num::Uint16(n) => Ok(f64::from(n)),
+            Num::Int8(n) => Ok(f64::from(n)),
+            Num::Int16(n) => Ok(f64::from(n)),
+            Num::Float(n) => Ok(f64::from(n)),
+            Num::Double(n) => Ok(n),
+            Num::Uint32(n) => Ok(f64::from(n)),
+            Num::Int32(n) => Ok(f64::from(n)),
+            Num::Decimal(n) => n.to_f64().ok_or(Error::CastError {
+                description: "Failed to cast f32 into decimal datatype".to_string(),
+            }),
+
+            _ => Err(Error::IllegalConversion),
+        }
+        .map(|n| Number(Num::Double(n)))
+    }
+
+    impl_is_type!(is_u8, is_uint8, Num::Uint8);
+    impl_is_type!(is_u16, is_uint16, Num::Uint16);
+    impl_is_type!(is_u32, is_uint32, Num::Uint32);
+    impl_is_type!(is_u64, is_uint64, Num::Uint64);
+
+    impl_is_type!(is_i8, is_int8, Num::Int8);
+    impl_is_type!(is_i16, is_int16, Num::Int16);
+    impl_is_type!(is_i32, is_int32, Num::Int32);
+    impl_is_type!(is_i64, is_int64, Num::Int64);
+
+    impl_is_type!(is_f32, is_float, Num::Float);
+    impl_is_type!(is_f64, is_double, Num::Double);
+
+    impl_is_type!(is_decimal, Num::Decimal);
+
+    impl_as_primative!(as_u8, u8);
+    impl_as_primative!(as_u16, u16);
+    impl_as_primative!(as_u32, u32);
+    impl_as_primative!(as_u64, u64);
+
+    impl_as_primative!(as_i8, i8);
+    impl_as_primative!(as_i16, i16);
+    impl_as_primative!(as_i32, i32);
+    impl_as_primative!(as_i64, i64);
+
+    impl_as_primative!(as_f32, f32);
+    impl_as_primative!(as_f64, f64);
+
     pub fn checked_add(self, lhs: Number) -> Result<Number, Error> {
         impl_op!(add, checked_add)(self, lhs)
     }
+
+    pub fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+
+    pub fn inner(&self) -> &Num {
+        &self.0
+    }
+
+    pub fn from_string(s: &str, dtype: DataType) -> Result<Number, Error> {
+        match dtype {
+            DataType::Uint8 => try_from_str!(u8, Num::Uint8, s, ParseIntError),
+            DataType::Uint16 => try_from_str!(u16, Num::Uint16, s, ParseIntError),
+            DataType::Uint32 => try_from_str!(u32, Num::Uint32, s, ParseIntError),
+            DataType::Uint64 => try_from_str!(u64, Num::Uint64, s, ParseIntError),
+
+            DataType::Int8 => try_from_str!(i8, Num::Int8, s, ParseIntError),
+            DataType::Int16 => try_from_str!(i16, Num::Int16, s, ParseIntError),
+            DataType::Int32 => try_from_str!(i32, Num::Int32, s, ParseIntError),
+            DataType::Int64 => try_from_str!(i64, Num::Int64, s, ParseIntError),
+
+            DataType::Float => try_from_str!(f32, Num::Float, s, ParseFloatError),
+            DataType::Double => try_from_str!(f64, Num::Double, s, ParseFloatError),
+            _ => Err(Error::InvalidDataType { datatype: dtype }),
+        }
+    }
 }
+
+macro_rules! impl_primative_partial_eq_number {
+    ($prim:ty, $num:path) => {
+        impl PartialEq<$prim> for Number {
+            fn eq(&self, lhs: &$prim) -> bool {
+                self.inner().eq(lhs)
+            }
+        }
+
+        impl PartialEq<$prim> for &Number {
+            fn eq(&self, lhs: &$prim) -> bool {
+                self.inner().eq(lhs)
+            }
+        }
+    };
+}
+
+impl_primative_partial_eq_number!(u8, Num::Uint8);
+impl_primative_partial_eq_number!(u16, Num::Uint16);
+impl_primative_partial_eq_number!(u32, Num::Uint32);
+impl_primative_partial_eq_number!(u64, Num::Uint64);
+impl_primative_partial_eq_number!(i8, Num::Int8);
+impl_primative_partial_eq_number!(i16, Num::Int16);
+impl_primative_partial_eq_number!(i32, Num::Int32);
+impl_primative_partial_eq_number!(i64, Num::Int64);
 
 #[cfg(test)]
 mod number_test {
@@ -219,5 +463,7 @@ mod number_test {
     fn test_cast() {
         let from_num: Number = 16i64.into();
         let converted = from_num.into_uint8();
+        assert!(converted.is_ok());
+        assert_eq!(converted.unwrap(), 16u8);
     }
 }

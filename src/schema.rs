@@ -1,5 +1,6 @@
 use crate::Value;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, PartialOrd)]
@@ -74,6 +75,23 @@ impl DataType {
         }
     }
 
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Uint8
+            | DataType::Uint16
+            | DataType::Uint32
+            | DataType::Uint64
+            | DataType::Float
+            | DataType::Decimal
+            | DataType::Double => true,
+            _ => false,
+        }
+    }
+
     /// Get the default value for the data type or return null
     pub fn default_value(&self) -> Value {
         Value::Null
@@ -132,18 +150,18 @@ impl Field {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Schema {
     pub(crate) name: Option<String>,
-    pub(crate) fields: Vec<Field>,
     pub(crate) doc: Option<String>,
+    pub(crate) fields: IndexMap<String, Field>,
 }
 
 impl Default for Schema {
     fn default() -> Self {
         Schema {
             name: None,
-            fields: vec![],
+            fields: IndexMap::new(),
             doc: None,
         }
     }
@@ -154,20 +172,21 @@ impl Schema {
         Schema::default()
     }
 
-    pub fn add_field<S: Into<String>>(&mut self, name: S) {
-        self.fields.push(Field::new(name))
+    pub fn add_field<S: Into<String> + Clone>(&mut self, name: S) -> usize {
+        self.push_field(Field::new(name))
     }
 
-    pub fn push_field(&mut self, field: Field) {
-        self.fields.push(field)
+    pub fn push_field(&mut self, field: Field) -> usize {
+        let (index, _) = self.fields.insert_full(field.name.clone(), field);
+        index
     }
 
     pub fn get_field(&self, name: &str) -> Option<&Field> {
-        self.fields.iter().find(|field| field.name == name)
+        self.fields.get(name)
     }
 
     pub fn get_field_mut(&mut self, name: &str) -> Option<&mut Field> {
-        self.fields.iter_mut().find(|field| field.name == name)
+        self.fields.get_mut(name)
     }
 
     pub fn find_field<S: Into<String>>(&self, name: S) -> Option<&Field> {
@@ -175,8 +194,29 @@ impl Schema {
         self.get_field(&name)
     }
 
+    pub fn find_index(&self, name: &str) -> Option<usize> {
+        self.fields
+            .get_full(name)
+            .and_then(|(index, _, _)| Some(index))
+    }
+
+    pub fn columns(&self) -> Vec<&String> {
+        self.fields
+            .iter()
+            .map(|(_, f)| &f.name)
+            .collect::<Vec<&String>>()
+    }
+
     pub fn is_weak(&self) -> bool {
-        self.fields.iter().any(|field| field.dtype == DataType::Any)
+        self.fields
+            .iter()
+            .any(|(_, field)| field.dtype == DataType::Any)
+    }
+
+    pub fn clear(&mut self) {
+        self.fields.clear();
+        self.name = None;
+        self.doc = None;
     }
 }
 

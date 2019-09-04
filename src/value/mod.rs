@@ -22,6 +22,15 @@ pub enum Value {
     Binary(Vec<u8>),
 }
 
+impl Value {
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            Value::Number(_) => true,
+            _ => false,
+        }
+    }
+}
+
 impl TypeOf for Value {
     fn type_of(&self) -> DataType {
         match self {

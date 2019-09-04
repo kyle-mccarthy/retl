@@ -11,9 +11,8 @@ use std::borrow::Cow;
 use std::iter::{FromIterator, Iterator};
 use std::ops::Index;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataFrame<'a> {
-    pub(crate) columns: Cow<'a, [String]>,
     pub(crate) data: Cow<'a, [Value]>,
     pub(crate) dim: Dim,
     pub(crate) schema: Schema,
@@ -22,7 +21,6 @@ pub struct DataFrame<'a> {
 impl<'a> std::default::Default for DataFrame<'a> {
     fn default() -> Self {
         DataFrame {
-            columns: Cow::from(vec![]),
             data: Cow::from(vec![]),
             dim: Dim::default(),
             schema: Schema::default(),
@@ -51,12 +49,11 @@ impl<'a> DataFrame<'a> {
 
         let mut schema = Schema::default();
 
-        columns.iter().for_each(|col| schema.add_field(col));
-
-        dbg!(&schema);
+        columns.iter().for_each(|col| {
+            let _ = schema.add_field(col);
+        });
 
         DataFrame {
-            columns: Cow::Owned(columns),
             data: data.into(),
             dim,
             schema,
@@ -67,6 +64,13 @@ impl<'a> DataFrame<'a> {
     pub fn empty() -> DataFrame<'a> {
         DataFrame::default()
     }
+
+    // pub fn with_schema(schema: Schema) -> DataFrame<'a> {
+    //     DataFrame {
+    //         schema,
+    //         data: vec![],
+    //     }
+    // }
 
     pub fn with_columns<S>(columns: &[S]) -> DataFrame<'a>
     where
@@ -84,7 +88,6 @@ impl<'a> DataFrame<'a> {
     pub fn push_column<S: Into<String>>(&mut self, column: S) {
         let name = column.into();
         self.schema.add_field(&name);
-        self.columns.to_mut().push(name);
         self.dim.0 += 1;
 
         let col_count = self.dim.0;
@@ -104,10 +107,12 @@ impl<'a> DataFrame<'a> {
     }
 
     pub fn remove_column(&mut self, column: usize) -> Result<()> {
-        if column >= self.columns.len() {
+        let index_exists = self.schema.fields.get_index(column).is_some();
+
+        if !index_exists {
             return Err(Error::IndexOutOfBounds {
                 index: column,
-                length: self.columns.len(),
+                length: self.schema.fields.len(),
             });
         }
 
@@ -119,7 +124,7 @@ impl<'a> DataFrame<'a> {
         }
 
         self.dim.0 -= 1;
-        self.columns.to_mut().remove(column);
+        self.schema.fields.swap_remove_index(column);
 
         Ok(())
     }
@@ -168,8 +173,8 @@ impl<'a> DataFrame<'a> {
             .extend(data.into_iter().flatten().collect::<Vec<Value>>());
     }
 
-    pub fn columns(&self) -> &[String] {
-        &self.columns
+    pub fn columns(&self) -> Vec<&String> {
+        self.schema.columns()
     }
 
     pub fn size(&self) -> usize {
@@ -235,7 +240,7 @@ impl<'a> DataFrame<'a> {
     }
 
     pub fn clear(&mut self) {
-        self.columns.to_mut().clear();
+        self.schema.clear();
         self.data.to_mut().clear();
         self.dim.0 = 0;
         self.dim.1 = 0;
@@ -353,7 +358,7 @@ mod dataframe_tests {
         assert!(df.remove_column(0).is_ok());
         assert_eq!(df.shape(), (1, 2));
 
-        assert_eq!(df.columns(), [String::from("b")]);
+        assert_eq!(df.columns(), ["b"]);
 
         assert_eq!(df[0], [10.into()]);
         assert_eq!(df[1], [20.into()]);

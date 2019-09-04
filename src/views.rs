@@ -1,10 +1,10 @@
-use crate::{DataFrame, Get, Value};
+use crate::{DataFrame, Get, Schema, Value};
 
 use std::borrow::Cow;
 use std::iter::Iterator;
 use std::ops::Index;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone)]
 pub struct View<'a, 'b: 'a> {
     ptr: usize,
     df: &'a DataFrame<'b>,
@@ -29,37 +29,37 @@ impl<'a, 'b> Iterator for View<'a, 'b> {
         self.ptr += 1;
 
         Some(SubView::new(
-            Cow::Borrowed(&self.df.columns),
+            &self.df.schema,
             Cow::Borrowed(&self.df.data[start..end]),
         ))
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SubView<'a> {
-    columns: Cow<'a, [String]>,
+    schema: &'a Schema,
     data: Cow<'a, [Value]>,
 }
 
 impl<'a> SubView<'a> {
-    pub fn new(columns: Cow<'a, [String]>, data: Cow<'a, [Value]>) -> SubView<'a> {
-        SubView { columns, data }
+    pub fn new(schema: &'a Schema, data: Cow<'a, [Value]>) -> SubView<'a> {
+        SubView { schema, data }
     }
 
     pub fn data(&self) -> Cow<'a, [Value]> {
         self.data.clone()
     }
 
-    pub fn columns(&self) -> Cow<'a, [String]> {
-        self.columns.clone()
+    pub fn columns(&self) -> Vec<&String> {
+        self.schema.columns()
     }
 
     pub fn column_index(&self, name: &str) -> Option<usize> {
-        self.columns.iter().position(|item| item == name)
+        self.schema.find_index(name)
     }
 
     pub fn has_column(&self, name: &str) -> bool {
-        self.column_index(name).is_some()
+        self.schema.fields.contains_key(name)
     }
 
     pub fn iter(&self) -> std::slice::Iter<Value> {

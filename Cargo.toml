@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 csv = "1.1.1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1.0.40"
+serde_json = "1.0"
 chrono = { version = "0.4.7", features = ["serde"] }
 regex = "1"
 prettytable-rs = "^0.8"
@@ -20,3 +20,4 @@ rust_decimal = "1.0.2"
 ordered-float = "1.0"
 num-traits = "0.2"
 snafu = "0.5.0"
+indexmap = { version = "1.1.0", features = ["serde-1"] }
