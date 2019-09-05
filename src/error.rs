@@ -21,6 +21,12 @@ pub enum Error {
         length
     ))]
     IndexOutOfBounds { index: usize, length: usize },
+
+    #[snafu(display("A column doesn't exist with the name {}", column))]
+    InvalidColumnName { column: String },
+
+    #[snafu(display("Failed cast op"))]
+    CastError { source: crate::ops::cast::Error },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

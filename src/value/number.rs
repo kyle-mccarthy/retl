@@ -411,7 +411,7 @@ impl Number {
         &self.0
     }
 
-    pub fn from_string(s: &str, dtype: DataType) -> Result<Number, Error> {
+    pub fn from_string(s: &str, dtype: &DataType) -> Result<Number, Error> {
         match dtype {
             DataType::Uint8 => try_from_str!(u8, Num::Uint8, s, ParseIntError),
             DataType::Uint16 => try_from_str!(u16, Num::Uint16, s, ParseIntError),
@@ -425,7 +425,9 @@ impl Number {
 
             DataType::Float => try_from_str!(f32, Num::Float, s, ParseFloatError),
             DataType::Double => try_from_str!(f64, Num::Double, s, ParseFloatError),
-            _ => Err(Error::InvalidDataType { datatype: dtype }),
+            _ => Err(Error::InvalidDataType {
+                datatype: dtype.clone(),
+            }),
         }
     }
 }

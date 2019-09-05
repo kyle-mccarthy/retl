@@ -43,7 +43,7 @@ macro_rules! pcast {
     ($([$x:path; $y:tt])*) => { $(pcast!($x; $y))*}
 }
 
-pub fn can_cast(to: &DataType, from: &DataType) -> bool {
+pub fn can_cast(from: &DataType, to: &DataType) -> bool {
     castable!(
         to,
         from,
@@ -67,7 +67,7 @@ pub fn can_cast(to: &DataType, from: &DataType) -> bool {
     )
 }
 
-pub fn can_try_cast(to: &DataType, from: &DataType) -> bool {
+pub fn can_try_cast(from: &DataType, to: &DataType) -> bool {
     castable!(
         to,
         from,
@@ -86,31 +86,44 @@ pub fn can_try_cast(to: &DataType, from: &DataType) -> bool {
 }
 
 /// Try to cast the value into some DataType or return error
-pub fn try_cast(value: Value, dtype: DataType) -> Result<Value> {
-    if can_cast(&dtype, &value.type_of()) {
-        if value.is_numeric() && dtype == DataType::String {
-            return Ok(value.to_string().into());
-        }
+pub fn try_cast(value: Value, dtype: &DataType) -> Result<Value> {
+    let cast_allowed = can_cast(&value.type_of(), &dtype);
+    let try_cast_allowed = can_try_cast(&value.type_of(), &dtype);
+
+    // if the cast isn't allowed error imnmediately
+    if !cast_allowed && !try_cast_allowed {
+        dbg!("early fail");
+        return Err(Error::IllegalCast {
+            source_type: value.type_of(),
+            dest_type: dtype.clone(),
+        });
     }
 
-    if can_try_cast(&dtype, &value.type_of()) {}
-    Ok(value)
+    // numeric casts
+    if dtype.is_numeric() {
+        return into_number(value, dtype);
+    }
+
+    match dtype {
+        DataType::String => into_string(value),
+        _ => unimplemented!("This type of cast hasn't been implemented yet."),
+    }
 }
 
 /// Wraps cast_or_default while using Null as the default value on failure
-pub fn safe_cast(value: Value, dtype: DataType) -> Value {
+pub fn safe_cast(value: Value, dtype: &DataType) -> Value {
     cast_or_default(value, dtype, Value::Null)
 }
 
 /// Attempt to cast the value into some DataType or return the default value
-pub fn cast_or_default(value: Value, dtype: DataType, default: Value) -> Value {
+pub fn cast_or_default(value: Value, dtype: &DataType, default: Value) -> Value {
     match try_cast(value, dtype) {
         Ok(value) => value,
         _ => default,
     }
 }
 
-pub fn into_number(value: Value, into_type: DataType) -> Result<Value> {
+pub fn into_number(value: Value, into_type: &DataType) -> Result<Value> {
     if !into_type.is_numeric() {
         return Err(Error::InvalidNumericCast);
     }
@@ -140,9 +153,27 @@ pub fn into_number(value: Value, into_type: DataType) -> Result<Value> {
         ),
         _ => Err(Error::IllegalCast {
             source_type: value.type_of(),
-            dest_type: into_type,
+            dest_type: into_type.clone(),
         }),
     }
+}
+
+pub fn into_string(value: Value) -> Result<Value> {
+    Ok(value.to_string().into())
+}
+
+pub fn cast(
+    df: &mut DataFrame,
+    column: &str,
+    to_type: &DataType,
+) -> std::result::Result<(), crate::error::Error> {
+    df.map_column(column, move |value| {
+        try_cast(value.clone(), &to_type)
+            .map(|casted| {
+                *value = casted;
+            })
+            .map_err(|e| crate::error::Error::CastError { source: e })
+    })
 }
 
 #[cfg(test)]

@@ -2,8 +2,9 @@ use crate::{
     dim::Dim,
     error::{Error, Result},
     schema::Schema,
+    traits::TypeOf,
     views::{SubView, View},
-    Value,
+    DataType, Value,
 };
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,8 @@ impl<'a> std::default::Default for DataFrame<'a> {
         }
     }
 }
+
+// TODO logically reorder the methods
 
 impl<'a> DataFrame<'a> {
     pub fn new<S>(columns: &[S], data: Vec<Vec<Value>>) -> DataFrame<'a>
@@ -57,7 +60,6 @@ impl<'a> DataFrame<'a> {
             data: data.into(),
             dim,
             schema,
-            ..Default::default()
         }
     }
 
@@ -97,7 +99,7 @@ impl<'a> DataFrame<'a> {
             let index = self.dim.get_value_index(row_num, col_index);
 
             // insert NULL into the new column for each row at the index. If the index exceeds the
-            // current length, push the value;
+            // current length, push the value.
             if index > self.data.len() {
                 self.data.to_mut().push(Value::Null);
             } else {
@@ -141,6 +143,8 @@ impl<'a> DataFrame<'a> {
 
         self.push_row_unchecked(data);
 
+        // TODO should we try to cast the data into the columns type?
+
         Ok(self.dim.1)
     }
 
@@ -177,6 +181,7 @@ impl<'a> DataFrame<'a> {
         self.schema.columns()
     }
 
+    // TODO should this be renamed to len?
     pub fn size(&self) -> usize {
         self.dim.1
     }
@@ -195,6 +200,7 @@ impl<'a> DataFrame<'a> {
         Some(&self.data.as_ref()[start..end])
     }
 
+    // TODO does it make sense to return the number of rows?
     pub fn rows(&self) -> usize {
         self.dim.1
     }
@@ -245,8 +251,98 @@ impl<'a> DataFrame<'a> {
         self.dim.0 = 0;
         self.dim.1 = 0;
     }
+
+    /// Map over each value of the column
+    pub fn map_column<F>(&mut self, column: &str, func: F) -> Result<()>
+    where
+        F: FnMut(&mut Value) -> std::result::Result<(), Error>,
+    {
+        let index = self
+            .schema
+            .find_index(column)
+            .ok_or(Error::InvalidColumnName {
+                column: column.to_string(),
+            })?;
+
+        // skip data up until the index and then step by the number of columns
+        // "a" | "b" | "c"
+        //  0  |  1  |  2
+        //  3  |  4  |  5
+        //  6  |  7  |  8
+        //  index(b) = 1, skip 1 then step by 3 (row length) -> [1, 4, 7]
+
+        self.data
+            .to_mut()
+            .iter_mut()
+            .skip(index)
+            .step_by(self.schema.fields.len())
+            .map(func)
+            .collect()
+    }
+
+    /// Return a columns values
+    pub fn column_values(&self, column: &str) -> Result<Vec<&Value>> {
+        let index = self
+            .schema
+            .find_index(column)
+            .ok_or(Error::InvalidColumnName {
+                column: column.to_string(),
+            })?;
+
+        Ok(self
+            .data
+            .iter()
+            .skip(index)
+            .step_by(self.schema.fields.len())
+            .collect())
+    }
+
+    /// try to cast the column and it's values into a certain type
+    pub fn cast_column(&mut self, column: &str, to_type: DataType) -> Result<()> {
+        crate::ops::cast::cast(self, column, &to_type).map(|_| {
+            let field = self.schema.get_field_mut(column).unwrap();
+            field.dtype = to_type;
+        })
+    }
+
+    /// Derive the schema's types from the data. Automatically updates the schema.
+    pub fn derive_schema(&mut self) {
+        // get the keys of the columns and iterate over each column along with the values trying to
+        // determine a more strict type and if the column contains null values
+        let keys = self.schema.fields.keys().cloned().collect::<Vec<String>>();
+
+        for key in keys {
+            let mut dtype: DataType = DataType::Any;
+            let mut strict_dtype = true;
+            let mut is_nullable = false;
+
+            self.column_values(&key)
+                .unwrap()
+                .iter()
+                .for_each(|v| match (&dtype, &v.type_of()) {
+                    (DataType::Any, vtype) => {
+                        dtype = vtype.clone();
+                    }
+                    (_, DataType::Null) => {
+                        is_nullable = true;
+                    }
+                    (col_type, vtype) => {
+                        if col_type != vtype {
+                            strict_dtype = false;
+                        }
+                    }
+                });
+
+            self.schema.fields.entry(key).and_modify(|field| {
+                field.dtype = dtype;
+                field.nullable = is_nullable;
+            });
+        }
+    }
 }
 
+/// TODO this currently loses the data type for the columns, has access to the schema, needs to be
+/// updated to use it when re-creating the data frame
 impl<'a> FromIterator<SubView<'a>> for DataFrame<'a> {
     fn from_iter<I: IntoIterator<Item = SubView<'a>>>(iter: I) -> Self {
         let mut view = iter.into_iter();
@@ -272,7 +368,7 @@ impl<'a> FromIterator<SubView<'a>> for DataFrame<'a> {
     }
 }
 
-/// Get the row at the specific index, returns an empty slice if index out of bounds
+/// Get the row at the specific index
 impl<'a> Index<usize> for DataFrame<'a> {
     type Output = [Value];
 
@@ -382,8 +478,57 @@ mod dataframe_tests {
     }
 
     #[test]
-    fn it_df_from_iterator() {
-        // let mut df = DataFrame::new(vec!, data: Vec<Vec<Value>>)
+    fn it_iterates_column_values() {
+        let mut df = DataFrame::new(
+            &["a", "b", "c"],
+            vec![
+                vec![0.into(), 1.into(), 2.into()],
+                vec![3.into(), 4.into(), 5.into()],
+                vec![6.into(), 7.into(), 8.into()],
+                vec![9.into(), 10.into(), 11.into()],
+            ],
+        );
+
+        let mut count = 0;
+        let expected_values: Vec<Value> = vec![1.into(), 4.into(), 7.into(), 10.into()];
+
+        let res = df.map_column("b", |v| {
+            assert_eq!(v, &expected_values[count]);
+            count += 1;
+            Ok(())
+        });
+
+        assert!(res.is_ok());
+        assert_eq!(count, 4);
     }
 
+    #[test]
+    fn it_casts_column() {
+        let mut df = DataFrame::new(
+            &["a", "b"],
+            vec![
+                vec![0.into(), 1.into()],
+                vec![2.into(), 3.into()],
+                vec![4.into(), 5.into()],
+            ],
+        );
+
+        let cast_result = df.cast_column("a", DataType::Int64);
+
+        assert!(cast_result.is_ok());
+    }
+
+    #[test]
+    fn it_derives_schema_from_data() {
+        let mut df = DataFrame::new(
+            &["a", "b"],
+            vec![
+                vec![0.into(), 1.into()],
+                vec![2.into(), 3.into()],
+                vec![4.into(), 5.into()],
+            ],
+        );
+
+        df.derive_schema();
+    }
 }

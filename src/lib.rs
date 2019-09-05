@@ -11,7 +11,7 @@ pub mod value;
 pub mod views;
 
 pub use dataframe::DataFrame;
-pub use schema::Schema;
+pub use schema::{DataType, Schema};
 pub use traits::Get;
 pub use value::Value;
 
