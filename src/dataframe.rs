@@ -1,6 +1,10 @@
 use crate::{
     dim::Dim,
     error::{Error, Result},
+    ops::{
+        cast,
+        convert::{self as convert, Convert},
+    },
     schema::Schema,
     traits::TypeOf,
     views::{SubView, View},
@@ -67,6 +71,12 @@ impl<'a> DataFrame<'a> {
         DataFrame::default()
     }
 
+    pub fn with_schema<S: Into<Schema>>(s: S) -> DataFrame<'a> {
+        DataFrame {
+            schema: s.into(),
+            ..Default::default()
+        }
+    }
     // pub fn with_schema(schema: Schema) -> DataFrame<'a> {
     //     DataFrame {
     //         schema,
@@ -83,8 +93,65 @@ impl<'a> DataFrame<'a> {
         DataFrame::new(columns, vec![])
     }
 
+    // TODO should this be renamed to len?
+    pub fn size(&self) -> usize {
+        self.dim.1
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.dim.shape()
+    }
+
     pub fn iter(&self) -> View<'_, 'a> {
         View::new(&self)
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    /// Derive the schema's types from the data. Automatically updates the schema.
+    pub fn derive_schema(&mut self) {
+        // get the keys of the columns and iterate over each column along with the values trying to
+        // determine a more strict type and if the column contains null values
+        let keys = self
+            .schema
+            .field_names()
+            .into_iter()
+            .map(|s| s.clone())
+            .collect::<Vec<String>>();
+
+        for key in keys {
+            let mut dtype: DataType = DataType::Any;
+            let mut strict_dtype = true;
+            let mut is_nullable = false;
+
+            self.column_values(&key)
+                .unwrap()
+                .iter()
+                .for_each(|v| match (&dtype, &v.type_of()) {
+                    (DataType::Any, vtype) => {
+                        dtype = vtype.clone();
+                    }
+                    (_, DataType::Null) => {
+                        is_nullable = true;
+                    }
+                    (col_type, vtype) => {
+                        if col_type != vtype {
+                            strict_dtype = false;
+                        }
+                    }
+                });
+
+            self.schema.entry(key).and_modify(|field| {
+                field.dtype = dtype;
+                field.nullable = is_nullable;
+            });
+        }
+    }
+
+    pub fn columns(&self) -> Vec<&String> {
+        self.schema.field_names()
     }
 
     pub fn push_column<S: Into<String>>(&mut self, column: S) {
@@ -109,14 +176,18 @@ impl<'a> DataFrame<'a> {
     }
 
     pub fn remove_column(&mut self, column: usize) -> Result<()> {
-        let index_exists = self.schema.fields.get_index(column).is_some();
+        let field = self.schema.find_by_index(column);
+        dbg!(&self.schema);
+        let index_exists = field.is_some();
 
         if !index_exists {
             return Err(Error::IndexOutOfBounds {
                 index: column,
-                length: self.schema.fields.len(),
+                length: self.schema.len(),
             });
         }
+
+        let field = field.unwrap();
 
         // starting from the end of our value buffer delete elements for associated with the index
         // being removed
@@ -126,9 +197,88 @@ impl<'a> DataFrame<'a> {
         }
 
         self.dim.0 -= 1;
-        self.schema.fields.swap_remove_index(column);
+        let name = field.name.clone();
+        let _ = self.schema.remove(&name);
 
         Ok(())
+    }
+
+    pub fn rename_column(&mut self, old_name: &str, new_name: &str) -> Option<String> {
+        self.schema.rename_field(old_name, new_name)
+    }
+
+    /// Map over each value of the column
+    pub fn map_column<F>(&mut self, column: &str, func: F) -> Result<()>
+    where
+        F: FnMut(&mut Value) -> std::result::Result<(), Error>,
+    {
+        let index = self
+            .schema
+            .find_index(column)
+            .ok_or(Error::InvalidColumnName {
+                column: column.to_string(),
+            })?;
+
+        // skip data up until the index and then step by the number of columns
+        // "a" | "b" | "c"
+        //  0  |  1  |  2
+        //  3  |  4  |  5
+        //  6  |  7  |  8
+        //  index(b) = 1, skip 1 then step by 3 (row length) -> [1, 4, 7]
+
+        self.data
+            .to_mut()
+            .iter_mut()
+            .skip(index)
+            .step_by(self.schema.len())
+            .map(func)
+            .collect()
+    }
+
+    /// Return a columns values
+    pub fn column_values(&self, column: &str) -> Result<Vec<&Value>> {
+        let index = self
+            .schema
+            .find_index(column)
+            .ok_or(Error::InvalidColumnName {
+                column: column.to_string(),
+            })?;
+
+        Ok(self
+            .data
+            .iter()
+            .skip(index)
+            .step_by(self.schema.len())
+            .collect())
+    }
+
+    /// try to cast the column and it's values into a certain type
+    pub fn cast_column(&mut self, column: &str, to_type: DataType) -> Result<()> {
+        cast::cast(self, column, &to_type).map(|_| {
+            let field = self.schema.get_field_mut(column).unwrap();
+            field.dtype = to_type;
+        })
+    }
+
+    /// try to convert the column and values into a type using the conversion. Differs from cast as
+    /// conversion as options (e.x. parsing a date requires the format of the date).
+    pub fn convert_column(&mut self, column: &str, conversion: Convert) -> Result<()> {
+        convert::convert(self, column, conversion).map(|dtype| {
+            self.schema.get_field_mut(column).map(|field| {
+                field.dtype = dtype;
+            });
+        })
+    }
+
+    /// Get a row by it's id/row number
+    pub fn row(&self, row: usize) -> Option<&[Value]> {
+        let (start, end) = self.dim.get_row_range(row);
+
+        if self.data.len() < end {
+            return None;
+        }
+
+        Some(&self.data.as_ref()[start..end])
     }
 
     /// Pushes new row onto the data, performs a check to ensure the length equals the number of
@@ -177,39 +327,11 @@ impl<'a> DataFrame<'a> {
             .extend(data.into_iter().flatten().collect::<Vec<Value>>());
     }
 
-    pub fn columns(&self) -> Vec<&String> {
-        self.schema.columns()
-    }
-
-    // TODO should this be renamed to len?
-    pub fn size(&self) -> usize {
-        self.dim.1
-    }
-
-    pub fn shape(&self) -> (usize, usize) {
-        self.dim.shape()
-    }
-
-    pub fn row(&self, row: usize) -> Option<&[Value]> {
-        let (start, end) = self.dim.get_row_range(row);
-
-        if self.data.len() < end {
-            return None;
-        }
-
-        Some(&self.data.as_ref()[start..end])
-    }
-
-    // TODO does it make sense to return the number of rows?
-    pub fn rows(&self) -> usize {
-        self.dim.1
-    }
-
     /// Print the data frame to std out for debugging
     /// You can limit the number of rows shown with  the num_rows parameter. Will print at most
     /// num_rows, 0 prints all rows.
     pub fn debug(&self, num_rows: usize) {
-        use prettytable::{format::Alignment, Cell, Row, Table};
+        use prettytable::{Cell, Row, Table};
 
         let mut table = Table::new();
 
@@ -224,7 +346,7 @@ impl<'a> DataFrame<'a> {
         table.add_row(row);
         table.add_row(type_row);
 
-        for (n, record) in self.iter().enumerate() {
+        for record in self.iter().take(num_rows) {
             let mut row = Row::empty();
 
             for c in record.iter() {
@@ -232,112 +354,23 @@ impl<'a> DataFrame<'a> {
             }
 
             table.add_row(row);
-
-            if n + 1 == num_rows {
-                let (_, width) = self.shape();
-                table.add_row(Row::new(vec![
-                    Cell::new_align("...", Alignment::CENTER).with_hspan(width)
-                ]));
-                break;
-            }
         }
+
+        table.add_row(Row::new(vec![Cell::new(&format!(
+            "Displayed {} of {} rows",
+            num_rows, self.dim.1
+        ))
+        .with_hspan(self.dim.0)]));
 
         table.printstd();
     }
 
+    /// Clear the schema, and data, and reset the dimensions
     pub fn clear(&mut self) {
         self.schema.clear();
         self.data.to_mut().clear();
         self.dim.0 = 0;
         self.dim.1 = 0;
-    }
-
-    /// Map over each value of the column
-    pub fn map_column<F>(&mut self, column: &str, func: F) -> Result<()>
-    where
-        F: FnMut(&mut Value) -> std::result::Result<(), Error>,
-    {
-        let index = self
-            .schema
-            .find_index(column)
-            .ok_or(Error::InvalidColumnName {
-                column: column.to_string(),
-            })?;
-
-        // skip data up until the index and then step by the number of columns
-        // "a" | "b" | "c"
-        //  0  |  1  |  2
-        //  3  |  4  |  5
-        //  6  |  7  |  8
-        //  index(b) = 1, skip 1 then step by 3 (row length) -> [1, 4, 7]
-
-        self.data
-            .to_mut()
-            .iter_mut()
-            .skip(index)
-            .step_by(self.schema.fields.len())
-            .map(func)
-            .collect()
-    }
-
-    /// Return a columns values
-    pub fn column_values(&self, column: &str) -> Result<Vec<&Value>> {
-        let index = self
-            .schema
-            .find_index(column)
-            .ok_or(Error::InvalidColumnName {
-                column: column.to_string(),
-            })?;
-
-        Ok(self
-            .data
-            .iter()
-            .skip(index)
-            .step_by(self.schema.fields.len())
-            .collect())
-    }
-
-    /// try to cast the column and it's values into a certain type
-    pub fn cast_column(&mut self, column: &str, to_type: DataType) -> Result<()> {
-        crate::ops::cast::cast(self, column, &to_type).map(|_| {
-            let field = self.schema.get_field_mut(column).unwrap();
-            field.dtype = to_type;
-        })
-    }
-
-    /// Derive the schema's types from the data. Automatically updates the schema.
-    pub fn derive_schema(&mut self) {
-        // get the keys of the columns and iterate over each column along with the values trying to
-        // determine a more strict type and if the column contains null values
-        let keys = self.schema.fields.keys().cloned().collect::<Vec<String>>();
-
-        for key in keys {
-            let mut dtype: DataType = DataType::Any;
-            let mut strict_dtype = true;
-            let mut is_nullable = false;
-
-            self.column_values(&key)
-                .unwrap()
-                .iter()
-                .for_each(|v| match (&dtype, &v.type_of()) {
-                    (DataType::Any, vtype) => {
-                        dtype = vtype.clone();
-                    }
-                    (_, DataType::Null) => {
-                        is_nullable = true;
-                    }
-                    (col_type, vtype) => {
-                        if col_type != vtype {
-                            strict_dtype = false;
-                        }
-                    }
-                });
-
-            self.schema.fields.entry(key).and_modify(|field| {
-                field.dtype = dtype;
-                field.nullable = is_nullable;
-            });
-        }
     }
 }
 

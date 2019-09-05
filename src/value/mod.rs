@@ -29,6 +29,13 @@ impl Value {
             _ => false,
         }
     }
+
+    pub fn is_null(&self) -> bool {
+        match self {
+            Value::Null => true,
+            _ => false,
+        }
+    }
 }
 
 impl TypeOf for Value {

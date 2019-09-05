@@ -1,0 +1,11 @@
+/Volumes/CODE/retl/examples/csv-example/target/debug/deps/bincode-66d728b23fd6c36e.rmeta: /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/lib.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/config.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/de/mod.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/de/read.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/error.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/internal.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/ser/mod.rs
+
+/Volumes/CODE/retl/examples/csv-example/target/debug/deps/bincode-66d728b23fd6c36e.d: /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/lib.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/config.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/de/mod.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/de/read.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/error.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/internal.rs /Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/ser/mod.rs
+
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/lib.rs:
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/config.rs:
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/de/mod.rs:
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/de/read.rs:
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/error.rs:
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/internal.rs:
+/Users/kylemccarthy/.cargo/registry/src/github.com-1ecc6299db9ec823/bincode-1.1.4/src/ser/mod.rs:

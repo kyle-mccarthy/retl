@@ -25,8 +25,11 @@ pub enum Error {
     #[snafu(display("A column doesn't exist with the name {}", column))]
     InvalidColumnName { column: String },
 
-    #[snafu(display("Failed cast op"))]
+    #[snafu(display("Failed to perform cast operation"))]
     CastError { source: crate::ops::cast::Error },
+
+    #[snafu(display("Failed to perform conversion operation"))]
+    ConvertError { source: crate::ops::convert::Error },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

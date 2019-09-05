@@ -51,7 +51,7 @@ impl<'a> SubView<'a> {
     }
 
     pub fn columns(&self) -> Vec<&String> {
-        self.schema.columns()
+        self.schema.field_names()
     }
 
     pub fn column_index(&self, name: &str) -> Option<usize> {
@@ -59,7 +59,7 @@ impl<'a> SubView<'a> {
     }
 
     pub fn has_column(&self, name: &str) -> bool {
-        self.schema.fields.contains_key(name)
+        self.schema.field_exists(name)
     }
 
     pub fn iter(&self) -> std::slice::Iter<Value> {

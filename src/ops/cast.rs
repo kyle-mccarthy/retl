@@ -1,9 +1,5 @@
-use crate::{
-    schema::{DataType, Schema},
-    traits::TypeOf,
-    DataFrame, Number, Value,
-};
-use snafu::{IntoError, ResultExt, Snafu};
+use crate::{schema::DataType, traits::TypeOf, DataFrame, Number, Value};
+use snafu::{IntoError, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -138,6 +134,11 @@ pub fn into_number(value: Value, into_type: &DataType) -> Result<Value> {
             DataType::Int16 => num.into_int16(),
             DataType::Int32 => num.into_int32(),
             DataType::Int64 => num.into_int64(),
+            DataType::Float => num.into_float(),
+            DataType::Double => num.into_double(),
+            DataType::Decimal => {
+                unimplemented!("casting into a decimal type has not yet been implemented")
+            }
             _ => panic!("into_type should be a number when calling into_number"),
         } {
             Ok(num) => Ok(Value::Number(num)),
