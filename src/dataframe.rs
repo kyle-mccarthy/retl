@@ -77,12 +77,6 @@ impl<'a> DataFrame<'a> {
             ..Default::default()
         }
     }
-    // pub fn with_schema(schema: Schema) -> DataFrame<'a> {
-    //     DataFrame {
-    //         schema,
-    //         data: vec![],
-    //     }
-    // }
 
     pub fn with_columns<S>(columns: &[S]) -> DataFrame<'a>
     where
@@ -117,8 +111,9 @@ impl<'a> DataFrame<'a> {
         let keys = self
             .schema
             .field_names()
-            .into_iter()
-            .map(|s| s.clone())
+            .iter()
+            .cloned()
+            .cloned()
             .collect::<Vec<String>>();
 
         for key in keys {
@@ -143,10 +138,10 @@ impl<'a> DataFrame<'a> {
                     }
                 });
 
-            self.schema.entry(key).and_modify(|field| {
+            if let Some(field) = self.schema.get_field_mut(&key) {
                 field.dtype = dtype;
                 field.nullable = is_nullable;
-            });
+            }
         }
     }
 
@@ -203,7 +198,7 @@ impl<'a> DataFrame<'a> {
         Ok(())
     }
 
-    pub fn rename_column(&mut self, old_name: &str, new_name: &str) -> Option<String> {
+    pub fn rename_column(&mut self, old_name: &str, new_name: &str) -> Option<&String> {
         self.schema.rename_field(old_name, new_name)
     }
 
@@ -229,7 +224,7 @@ impl<'a> DataFrame<'a> {
         self.data
             .to_mut()
             .iter_mut()
-            .skip(index)
+            .skip(*index)
             .step_by(self.schema.len())
             .map(func)
             .collect()
@@ -247,12 +242,12 @@ impl<'a> DataFrame<'a> {
         Ok(self
             .data
             .iter()
-            .skip(index)
+            .skip(*index)
             .step_by(self.schema.len())
             .collect())
     }
 
-    /// try to cast the column and it's values into a certain type
+    /// try to cast the column and its values into a certain type
     pub fn cast_column(&mut self, column: &str, to_type: DataType) -> Result<()> {
         cast::cast(self, column, &to_type).map(|_| {
             let field = self.schema.get_field_mut(column).unwrap();
@@ -264,13 +259,13 @@ impl<'a> DataFrame<'a> {
     /// conversion as options (e.x. parsing a date requires the format of the date).
     pub fn convert_column(&mut self, column: &str, conversion: Convert) -> Result<()> {
         convert::convert(self, column, conversion).map(|dtype| {
-            self.schema.get_field_mut(column).map(|field| {
+            if let Some(field) = self.schema.get_field_mut(column) {
                 field.dtype = dtype;
-            });
+            }
         })
     }
 
-    /// Get a row by it's id/row number
+    /// Get a row by its id/row number
     pub fn row(&self, row: usize) -> Option<&[Value]> {
         let (start, end) = self.dim.get_row_range(row);
 
@@ -330,7 +325,7 @@ impl<'a> DataFrame<'a> {
     /// Print the data frame to std out for debugging
     /// You can limit the number of rows shown with  the num_rows parameter. Will print at most
     /// num_rows, 0 prints all rows.
-    pub fn debug(&self, num_rows: usize) {
+    pub fn print(&self, num_rows: usize) {
         use prettytable::{Cell, Row, Table};
 
         let mut table = Table::new();
@@ -356,9 +351,11 @@ impl<'a> DataFrame<'a> {
             table.add_row(row);
         }
 
+        let rows_displayed = std::cmp::min(num_rows, self.dim.1);
+
         table.add_row(Row::new(vec![Cell::new(&format!(
             "Displayed {} of {} rows",
-            num_rows, self.dim.1
+            rows_displayed, self.dim.1
         ))
         .with_hspan(self.dim.0)]));
 
