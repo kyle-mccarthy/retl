@@ -1,7 +1,7 @@
 use crate::Value;
 
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::HashMap;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, PartialOrd)]
 pub enum DataType {
@@ -131,6 +131,8 @@ impl From<&str> for DataType {
     }
 }
 
+// TODO fields with aliases
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct Field {
     pub(crate) name: String,
@@ -138,7 +140,6 @@ pub struct Field {
     pub(crate) default: Option<Value>,
     pub(crate) doc: Option<String>,
     pub(crate) dtype: DataType,
-    pub(crate) index: usize,
 }
 
 impl Field {
@@ -149,14 +150,6 @@ impl Field {
             default: None,
             doc: None,
             dtype: DataType::Any,
-            index: 0,
-        }
-    }
-
-    pub fn with_index(name: String, index: usize) -> Field {
-        Field {
-            index,
-            ..Field::new(name)
         }
     }
 
@@ -169,14 +162,20 @@ impl Field {
 pub struct Schema {
     name: Option<String>,
     doc: Option<String>,
-    fields: HashMap<String, Field>,
+    fields: Vec<Field>,
+    index: HashMap<String, usize>,
 }
 
+// TODO evaluate possibility of aliases for the fields
+// TODO evaluate a way to index the fields by order too - as of right now getting a field by order
+// requires iterating over all the values. It could be better to store the fields in a vec and have
+// a map that points the name/string index position
 impl Default for Schema {
     fn default() -> Self {
         Schema {
             name: None,
-            fields: HashMap::new(),
+            fields: Vec::new(),
+            index: HashMap::new(),
             doc: None,
         }
     }
@@ -187,43 +186,56 @@ impl Schema {
         Schema::default()
     }
 
-    pub fn with_fields(fields: Vec<Field>) -> Schema {
-        let fields: HashMap<String, Field> = fields
-            .into_iter()
-            .enumerate()
-            .map(|(i, mut f)| {
-                f.index = i;
-                (f.name.to_string(), f)
-            })
-            .collect::<HashMap<String, Field>>();
-
+    pub fn with_size(size: usize) -> Schema {
         Schema {
-            fields,
-            ..Default::default()
+            name: None,
+            doc: None,
+            fields: Vec::with_capacity(size),
+            index: HashMap::with_capacity(size),
         }
+    }
+
+    pub fn with_fields(fields: Vec<Field>) -> Schema {
+        let mut schema = Schema::with_size(fields.len());
+
+        for field in fields {
+            schema.index.insert(field.name.clone(), schema.fields.len());
+            schema.fields.push(field);
+        }
+
+        schema
     }
 
     pub fn add_field<S: Into<String> + Clone>(&mut self, name: S) -> usize {
         self.push_field(Field::new(name.into()))
     }
 
-    pub fn push_field(&mut self, mut field: Field) -> usize {
+    pub fn push_field(&mut self, field: Field) -> usize {
         let index = self.fields.len();
-        field.index = index;
-        let _ = self.fields.insert(field.name.clone(), field);
+        self.index.insert(field.name.clone(), index);
+        self.fields.push(field);
+
         index
     }
 
+    pub fn get_field_full(&self, name: &str) -> Option<(&usize, &Field)> {
+        self.index.get(name).and_then(|index| {
+            if let Some(field) = self.fields.get(*index) {
+                return Some((index, field));
+            }
+            None
+        })
+    }
+
     pub fn get_field(&self, name: &str) -> Option<&Field> {
-        self.fields.get(name)
+        self.index
+            .get(name)
+            .and_then(|index| self.fields.get(*index))
     }
 
     pub fn get_field_mut(&mut self, name: &str) -> Option<&mut Field> {
-        self.fields.get_mut(name)
-    }
-
-    pub fn entry(&mut self, key: String) -> Entry<String, Field> {
-        self.fields.entry(key)
+        let index = *self.index.get(name)?;
+        self.fields.get_mut(index)
     }
 
     pub fn find_field<S: Into<String>>(&self, name: S) -> Option<&Field> {
@@ -231,50 +243,44 @@ impl Schema {
         self.get_field(&name)
     }
 
-    pub fn find_index(&self, name: &str) -> Option<usize> {
-        self.fields.get(name).and_then(|field| Some(field.index))
+    pub fn find_index(&self, name: &str) -> Option<&usize> {
+        self.index.get(name)
     }
 
     pub fn find_by_index(&self, index: usize) -> Option<&Field> {
-        self.fields.values().find(|f| f.index == index)
+        self.fields.get(index)
     }
 
     pub fn field_names(&self) -> Vec<&String> {
-        let mut ordered_fields = self
-            .fields
+        self.fields
             .iter()
-            .map(|(_, f)| (f.index, &f.name))
-            .collect::<Vec<(usize, &String)>>();
-
-        ordered_fields.sort_by(|a, b| a.0.cmp(&b.0));
-
-        ordered_fields
-            .into_iter()
-            .map(|(_, name)| name)
+            .map(|f| &f.name)
             .collect::<Vec<&String>>()
     }
 
     pub fn field_exists(&self, name: &str) -> bool {
-        self.fields.contains_key(name)
+        self.index.contains_key(name)
     }
 
     pub fn remove(&mut self, name: &str) -> Option<Field> {
-        self.fields.remove(name)
+        self.index
+            .remove(name)
+            .and_then(|index| Some(self.fields.remove(index)))
     }
 
-    pub fn rename_field(&mut self, old_name: &str, new_name: &str) -> Option<String> {
-        self.fields.remove(old_name).and_then(|mut field| {
-            let new_name = new_name.to_string();
-            field.name = new_name.clone();
-            self.fields.insert(new_name.clone(), field);
-            Some(new_name)
-        })
+    pub fn rename_field(&mut self, old_name: &str, new_name: &str) -> Option<&String> {
+        let index = *self.index.get(old_name)?;
+
+        self.index.remove(old_name);
+        self.index.insert(new_name.to_string(), index);
+
+        let mut field = &mut self.fields[index];
+        field.name = new_name.to_string();
+        Some(&field.name)
     }
 
     pub fn is_weak(&self) -> bool {
-        self.fields
-            .iter()
-            .any(|(_, field)| field.dtype == DataType::Any)
+        self.fields.iter().any(|field| field.dtype == DataType::Any)
     }
 
     pub fn len(&self) -> usize {
@@ -295,9 +301,8 @@ impl Schema {
 impl From<&[&str]> for Schema {
     fn from(columns: &[&str]) -> Schema {
         let fields = columns
-            .into_iter()
-            .enumerate()
-            .map(|(i, name)| Field::with_index(name.to_string(), i))
+            .iter()
+            .map(|name| Field::new(name.to_string()))
             .collect::<Vec<Field>>();
         Schema::with_fields(fields)
     }
