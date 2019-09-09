@@ -24,8 +24,6 @@ impl<'a> CsvDestination for DataFrame<'a> {
         // TODO update to write somewhere other than stdout
         let mut writer = csv::Writer::from_writer(std::io::stdout());
 
-        // let mut writer = csv::Writer::from_path("/Users/kylemccarthy/Downloads/out.csv").unwrap();
-
         writer
             .write_record(self.columns())
             .context(WriteRecordError)?;
@@ -66,7 +64,6 @@ mod tests {
 
         let res = df.to_csv();
 
-        // TODO add some way to data written
-        dbg!(res);
+        // TODO verify data written?
     }
 }
