@@ -136,15 +136,13 @@ pub fn into_number(value: Value, into_type: &DataType) -> Result<Value> {
             DataType::Int64 => num.into_int64(),
             DataType::Float => num.into_float(),
             DataType::Double => num.into_double(),
-            DataType::Decimal => {
-                unimplemented!("casting into a decimal type has not yet been implemented")
-            }
+            DataType::Decimal => num.into_decimal(),
             _ => panic!("into_type should be a number when calling into_number"),
         } {
             Ok(num) => Ok(Value::Number(num)),
             Err(err) => Err(FailedNumericCast.into_error(err)),
         },
-        Value::String(s) => Number::from_string(&s, into_type)
+        Value::String(s) => Number::from_str(&s, into_type)
             .map(Value::Number)
             .map_err(|e| FailedNumericCast.into_error(e)),
         // convert the bool to an int and then into the right data type

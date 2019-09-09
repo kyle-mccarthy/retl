@@ -43,6 +43,12 @@ pub enum Error {
         from_str: String,
     },
 
+    #[snafu(display("Failed to parse string to decimal value"))]
+    ParseDecimalError {
+        from_str: String,
+        description: String,
+    },
+
     #[snafu(display("Attempted to use non numeric data type as numeric"))]
     InvalidDataType {
         datatype: DataType,
@@ -371,6 +377,29 @@ impl Number {
         .map(|n| Number(Num::Double(n)))
     }
 
+    pub fn into_decimal(self) -> Result<Number, Error> {
+        use rust_decimal::prelude::FromPrimitive;
+
+        match self.0 {
+            Num::Uint8(n) => Ok(Decimal::from(n)),
+            Num::Uint16(n) => Ok(Decimal::from(n)),
+            Num::Uint32(n) => Ok(Decimal::from(n)),
+            Num::Uint64(n) => Ok(Decimal::from(n)),
+            Num::Int8(n) => Ok(Decimal::from(n)),
+            Num::Int16(n) => Ok(Decimal::from(n)),
+            Num::Int32(n) => Ok(Decimal::from(n)),
+            Num::Int64(n) => Ok(Decimal::from(n)),
+            Num::Float(n) => Decimal::from_f32(n).ok_or(Error::CastError {
+                description: "Failed to convert f32 into decimal".to_string(),
+            }),
+            Num::Double(n) => Decimal::from_f64(n).ok_or(Error::CastError {
+                description: "Failed to convert f64 into decimal".to_string(),
+            }),
+            Num::Decimal(n) => Ok(n),
+        }
+        .map(|n| Number(Num::Decimal(n)))
+    }
+
     impl_is_type!(is_u8, is_uint8, Num::Uint8);
     impl_is_type!(is_u16, is_uint16, Num::Uint16);
     impl_is_type!(is_u32, is_uint32, Num::Uint32);
@@ -411,7 +440,7 @@ impl Number {
         &self.0
     }
 
-    pub fn from_string(s: &str, dtype: &DataType) -> Result<Number, Error> {
+    pub fn from_str(s: &str, dtype: &DataType) -> Result<Number, Error> {
         match dtype {
             DataType::Uint8 => try_from_str!(u8, Num::Uint8, s, ParseIntError),
             DataType::Uint16 => try_from_str!(u16, Num::Uint16, s, ParseIntError),
@@ -425,6 +454,12 @@ impl Number {
 
             DataType::Float => try_from_str!(f32, Num::Float, s, ParseFloatError),
             DataType::Double => try_from_str!(f64, Num::Double, s, ParseFloatError),
+            DataType::Decimal => Decimal::from_str(s)
+                .map_err(|e| Error::ParseDecimalError {
+                    from_str: s.into(),
+                    description: e.description().into(),
+                })
+                .map(|d| Number(Num::Decimal(d))),
             _ => Err(Error::InvalidDataType {
                 datatype: dtype.clone(),
             }),
