@@ -27,5 +27,5 @@ fn main() {
     df.cast_column("price", DataType::Uint32)
         .expect("failed to cast price into u32");
 
-    df.debug(10);
+    df.print(10);
 }
