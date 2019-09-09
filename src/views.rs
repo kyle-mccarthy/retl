@@ -54,7 +54,7 @@ impl<'a> SubView<'a> {
         self.schema.field_names()
     }
 
-    pub fn column_index(&self, name: &str) -> Option<usize> {
+    pub fn column_index(&self, name: &str) -> Option<&usize> {
         self.schema.find_index(name)
     }
 
@@ -87,7 +87,7 @@ impl<'a> Index<&str> for SubView<'a> {
     type Output = Value;
 
     fn index(&self, index: &str) -> &Self::Output {
-        &self.data[self.column_index(index).unwrap()]
+        &self.data[*self.column_index(index).unwrap()]
     }
 }
 
@@ -110,14 +110,17 @@ impl<'a> Get<&str> for SubView<'a> {
 
     fn get(&self, index: &str) -> Option<&Self::Output> {
         match self.column_index(index) {
-            Some(index) => self.data.get(index),
+            Some(index) => self.data.get(*index),
             None => None,
         }
     }
 
     fn get_mut(&mut self, index: &str) -> Option<&mut Self::Output> {
         match self.column_index(index) {
-            Some(index) => self.data.to_mut().get_mut(index),
+            Some(index) => {
+                let index = index.clone();
+                self.data.to_mut().get_mut(index)
+            }
             None => None,
         }
     }
