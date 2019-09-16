@@ -5,10 +5,9 @@ use crate::{
         cast,
         convert::{self as convert, Convert},
     },
-    schema::Schema,
     traits::TypeOf,
     views::{SubView, View},
-    DataType, Value,
+    DataType, Field, Schema, Value,
 };
 
 use serde::{Deserialize, Serialize};
@@ -36,6 +35,7 @@ impl<'a> std::default::Default for DataFrame<'a> {
 // TODO logically reorder the methods
 
 impl<'a> DataFrame<'a> {
+    // TODO deprecate and replace with impl of with_date
     pub fn new<S>(columns: &[S], data: Vec<Vec<Value>>) -> DataFrame<'a>
     where
         S: Into<String> + Clone,
@@ -69,6 +69,33 @@ impl<'a> DataFrame<'a> {
 
     pub fn empty() -> DataFrame<'a> {
         DataFrame::default()
+    }
+
+    pub fn with_data(schema: Schema, data: Vec<Vec<Value>>) -> DataFrame<'a> {
+        let dim = Dim::new(schema.len(), data.len());
+
+        let num_columns = schema.len();
+        let data = data
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .map(|(i, mut v)| {
+                let col_idx = i % num_columns;
+                let dtype: &DataType = &schema[col_idx].dtype();
+
+                if !dtype.is_any() && !v.is_null() && v.type_of() != dtype {
+                    v = cast::safe_cast(v, dtype);
+                }
+
+                v
+            })
+            .collect::<Vec<Value>>();
+
+        DataFrame {
+            data: Cow::from(data),
+            schema,
+            dim,
+        }
     }
 
     pub fn with_schema<S: Into<Schema>>(s: S) -> DataFrame<'a> {
@@ -124,7 +151,7 @@ impl<'a> DataFrame<'a> {
             self.column_values(&key)
                 .unwrap()
                 .iter()
-                .for_each(|v| match (&dtype, &v.type_of()) {
+                .for_each(|v| match (&dtype, v.type_of()) {
                     (DataType::Any, vtype) => {
                         dtype = vtype.clone();
                     }
@@ -145,34 +172,80 @@ impl<'a> DataFrame<'a> {
         }
     }
 
+    /// TODO attempt to cast/convert the data into the DF's schema
+    pub fn coherce_data(&mut self) {}
+
     pub fn columns(&self) -> Vec<&String> {
         self.schema.field_names()
     }
 
-    pub fn push_column<S: Into<String>>(&mut self, column: S) {
-        let name = column.into();
-        self.schema.add_field(&name);
+    /// Pushes the column onto the existing dataframe, inserting the values into the bucket at each
+    /// row
+    pub fn push_column(&mut self, field: Field, values: Vec<Value>) -> Result<(), Error> {
+        if values.len() != self.dim.1 {
+            return Err(Error::InvalidDataLength {
+                expected: self.dim.1,
+                actual: values.len(),
+            });
+        }
+
+        if self.schema.has_field(&field.name) {
+            return Err(Error::DuplicateColumnName { column: field.name });
+        }
+
+        let col_index = self.schema.add_field(field);
         self.dim.0 += 1;
 
-        let col_count = self.dim.0;
-        let col_index = col_count - 1;
+        for row_num in (0..self.dim.1).rev() {
+            let index = (row_num + 1) * col_index;
+
+            dbg!(&index);
+
+            if index > self.data.len() {
+                self.data.to_mut().push(values[row_num].clone());
+            } else {
+                self.data.to_mut().insert(index, values[row_num].clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Adds a new column to the dataframe, filling the corresponding values in each row with
+    /// either the default value or null
+    pub fn add_column<F: Into<Field>>(&mut self, column: F) -> Result<(), Error> {
+        let field: Field = column.into();
+
+        if self.schema.has_field(&field.name) {
+            return Err(Error::DuplicateColumnName { column: field.name });
+        }
+
+        let col_index = self.schema.add_field(field.clone());
+        self.dim.0 += 1;
+
+        let field_val = if let Some(default_value) = field.default {
+            default_value
+        } else {
+            Value::Null
+        };
 
         for row_num in 0..self.dim.1 {
             let index = self.dim.get_value_index(row_num, col_index);
 
             // insert NULL into the new column for each row at the index. If the index exceeds the
-            // current length, push the value.
+            // current length, push the value to the end of the vec.
             if index > self.data.len() {
-                self.data.to_mut().push(Value::Null);
+                self.data.to_mut().push(field_val.clone());
             } else {
-                self.data.to_mut().insert(index, Value::Null);
+                self.data.to_mut().insert(index, field_val.clone());
             }
         }
+
+        Ok(())
     }
 
     pub fn remove_column(&mut self, column: usize) -> Result<()> {
         let field = self.schema.find_by_index(column);
-        dbg!(&self.schema);
         let index_exists = field.is_some();
 
         if !index_exists {
@@ -412,13 +485,12 @@ impl<'a> Index<usize> for DataFrame<'a> {
 #[cfg(test)]
 mod dataframe_tests {
     use super::*;
+    use crate::{df, field, row, val};
 
     #[test]
     fn it_iterates() {
-        let df = DataFrame::new(
-            &["a", "b"],
-            vec![vec![1.into(), 10.into()], vec![2.into(), 20.into()]],
-        );
+        let df = df!([("a", DataType::Uint8), "b"], [row![1, 10], row![2, 20]]);
+        dbg!(&df);
 
         {
             let mut iter = df.iter();
@@ -426,13 +498,13 @@ mod dataframe_tests {
             let row = iter.next();
             assert!(row.is_some());
             let row = row.unwrap();
-            assert_eq!(row, &[1.into(), 10.into()] as &[Value]);
+            assert_eq!(row, row![val!(1, DataType::Uint8), val!(10)]);
 
             let row = iter.next();
 
             assert!(row.is_some());
             let row = row.unwrap();
-            assert_eq!(row, &[2.into(), 20.into()] as &[Value]);
+            assert_eq!(row, row![val!(2, DataType::Uint8), val!(20)]);
 
             let row = iter.next();
             assert!(row.is_none());
@@ -442,30 +514,30 @@ mod dataframe_tests {
     }
 
     #[test]
-    fn it_pushes_column() {
+    fn it_adds_column() {
         let mut df = DataFrame::empty();
 
-        df.push_column("a");
-        df.push_column("b");
+        df.add_column("a");
+        df.add_column("b");
 
         assert_eq!(df.shape(), (2, 0));
     }
 
     #[test]
-    fn it_pushes_column_and_reshapes_data() {
+    fn it_adds_column_and_reshapes_data() {
         // shape (1,2) to (2,2)
         let mut df = DataFrame::new(&[String::from("a")], vec![vec![1.into()], vec![2.into()]]);
 
         assert_eq!(df.shape(), (1, 2));
 
-        df.push_column("b");
+        df.add_column("b");
 
         assert_eq!(df.shape(), (2, 2));
         assert_eq!(df[0], [1.into(), Value::Null]);
         assert_eq!(df[1], [2.into(), Value::Null]);
 
         // shape (2, 2) to (3, 2)
-        df.push_column("c");
+        df.add_column("c");
 
         assert_eq!(df.shape(), (3, 2));
         assert_eq!(df[0], [1.into(), Value::Null, Value::Null]);
@@ -550,15 +622,25 @@ mod dataframe_tests {
 
     #[test]
     fn it_derives_schema_from_data() {
-        let mut df = DataFrame::new(
-            &["a", "b"],
-            vec![
-                vec![0.into(), 1.into()],
-                vec![2.into(), 3.into()],
-                vec![4.into(), 5.into()],
-            ],
-        );
+        let mut df = df!(["a", "b"], [row![0, 1], row![2, 3], row![4, 5]]);
+
+        assert_eq!(df.schema()[0].dtype(), &DataType::Any);
+        assert_eq!(df.schema()[1].dtype(), &DataType::Any);
 
         df.derive_schema();
+
+        assert_eq!(df.schema()[0].dtype(), &DataType::Int32);
+        assert_eq!(df.schema()[1].dtype(), &DataType::Int32);
+    }
+
+    #[test]
+    fn it_pushes_column() {
+        let mut df = df!(["a", "b"], [row![0, 1], row![2, 3]]);
+
+        assert!(df
+            .push_column(field!("c"), vec![val!("x"), val!("y")])
+            .is_ok());
+
+        df.print(10);
     }
 }

@@ -90,7 +90,7 @@ pub fn try_cast(value: Value, dtype: &DataType) -> Result<Value> {
     if !cast_allowed && !try_cast_allowed {
         dbg!("early fail");
         return Err(Error::IllegalCast {
-            source_type: value.type_of(),
+            source_type: value.type_of().clone(),
             dest_type: dtype.clone(),
         });
     }
@@ -151,7 +151,7 @@ pub fn into_number(value: Value, into_type: &DataType) -> Result<Value> {
             into_type,
         ),
         _ => Err(Error::IllegalCast {
-            source_type: value.type_of(),
+            source_type: value.type_of().clone(),
             dest_type: into_type.clone(),
         }),
     }

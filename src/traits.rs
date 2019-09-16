@@ -8,5 +8,5 @@ pub trait Get<T> {
 }
 
 pub trait TypeOf {
-    fn type_of(&self) -> DataType;
+    fn type_of(&self) -> &DataType;
 }

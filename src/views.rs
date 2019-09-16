@@ -137,3 +137,9 @@ impl<'a> PartialEq<[Value]> for SubView<'a> {
         self.data == rhs
     }
 }
+
+impl<'a> PartialEq<Vec<Value>> for SubView<'a> {
+    fn eq(&self, rhs: &Vec<Value>) -> bool {
+        self.data == rhs.as_slice()
+    }
+}

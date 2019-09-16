@@ -2,6 +2,7 @@ use crate::Value;
 
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::HashMap;
+use std::ops::Index;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, PartialOrd)]
 pub enum DataType {
@@ -96,6 +97,14 @@ impl DataType {
     pub fn default_value(&self) -> Value {
         Value::Null
     }
+
+    pub fn is_any(&self) -> bool {
+        self == &DataType::Any
+    }
+
+    pub fn is_null(&self) -> bool {
+        self == &DataType::Null
+    }
 }
 
 impl std::fmt::Display for DataType {
@@ -153,8 +162,42 @@ impl Field {
         }
     }
 
+    pub fn with_type(name: &str, dt: DataType) -> Field {
+        Field {
+            name: name.to_string(),
+            dtype: dt,
+            nullable: true,
+            default: None,
+            doc: None,
+        }
+    }
+
     pub fn dtype(&self) -> &DataType {
         &self.dtype
+    }
+}
+
+impl From<String> for Field {
+    fn from(s: String) -> Field {
+        Field::new(s)
+    }
+}
+
+impl From<&String> for Field {
+    fn from(s: &String) -> Field {
+        Field::new(s)
+    }
+}
+
+impl From<&str> for Field {
+    fn from(s: &str) -> Field {
+        Field::new(s)
+    }
+}
+
+impl From<(&str, DataType)> for Field {
+    fn from(t: (&str, DataType)) -> Field {
+        Field::with_type(t.0, t.1)
     }
 }
 
@@ -206,8 +249,8 @@ impl Schema {
         schema
     }
 
-    pub fn add_field<S: Into<String> + Clone>(&mut self, name: S) -> usize {
-        self.push_field(Field::new(name.into()))
+    pub fn add_field<F: Into<Field> + Clone>(&mut self, field: F) -> usize {
+        self.push_field(field.into())
     }
 
     pub fn push_field(&mut self, field: Field) -> usize {
@@ -231,6 +274,10 @@ impl Schema {
         self.index
             .get(name)
             .and_then(|index| self.fields.get(*index))
+    }
+
+    pub fn has_field(&self, name: &str) -> bool {
+        self.index.contains_key(name)
     }
 
     pub fn get_field_mut(&mut self, name: &str) -> Option<&mut Field> {
@@ -308,9 +355,25 @@ impl From<&[&str]> for Schema {
     }
 }
 
+impl Index<usize> for Schema {
+    type Output = Field;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.fields[index]
+    }
+}
+
 #[cfg(test)]
 mod schema_tests {
     use super::*;
+
+    #[test]
+    fn it_schema_from_macro() {
+        use crate::schema;
+
+        let s = schema!(("a", DataType::Int8));
+
+        dbg!(s);
+    }
 
     #[test]
     fn it_identifies_weak_vs_strong() {

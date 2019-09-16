@@ -39,16 +39,16 @@ impl Value {
 }
 
 impl TypeOf for Value {
-    fn type_of(&self) -> DataType {
+    fn type_of(&self) -> &DataType {
         match self {
-            Value::Bool(_) => DataType::Bool,
-            Value::String(_) => DataType::String,
-            Value::Array(_) => DataType::Array,
-            Value::Map(_) => DataType::Map,
+            Value::Bool(_) => &DataType::Bool,
+            Value::String(_) => &DataType::String,
+            Value::Array(_) => &DataType::Array,
+            Value::Map(_) => &DataType::Map,
             Value::Number(n) => n.type_of(),
-            Value::Date(_) => DataType::Date,
-            Value::Binary(_) => DataType::Binary,
-            _ => DataType::Any,
+            Value::Date(_) => &DataType::Date,
+            Value::Binary(_) => &DataType::Binary,
+            _ => &DataType::Any,
         }
     }
 }

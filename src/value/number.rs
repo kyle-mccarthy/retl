@@ -86,13 +86,6 @@ pub enum Num {
     Decimal(Decimal),
 }
 
-// fn checked_add<T>(n: Num, lhs: T, rhs: T) -> Result<Num, Error>
-// where
-//     T: std::ops::Add<Output = T>,
-// {
-//     Ok(n(lhs.add(rhs) as T))
-// }
-
 macro_rules! impl_op {
     ($op:ident, $checked_op:ident) => {{
         |lhs: Number, rhs: Number| -> Result<Number, Error> {
@@ -239,19 +232,19 @@ macro_rules! impl_traits {
 }
 
 impl TypeOf for Num {
-    fn type_of(&self) -> DataType {
+    fn type_of(&self) -> &DataType {
         match self {
-            Num::Uint8(_) => DataType::Uint8,
-            Num::Uint16(_) => DataType::Uint16,
-            Num::Uint32(_) => DataType::Uint32,
-            Num::Uint64(_) => DataType::Uint64,
-            Num::Int8(_) => DataType::Int8,
-            Num::Int16(_) => DataType::Int16,
-            Num::Int32(_) => DataType::Int32,
-            Num::Int64(_) => DataType::Int64,
-            Num::Float(_) => DataType::Float,
-            Num::Double(_) => DataType::Double,
-            Num::Decimal(_) => DataType::Decimal,
+            Num::Uint8(_) => &DataType::Uint8,
+            Num::Uint16(_) => &DataType::Uint16,
+            Num::Uint32(_) => &DataType::Uint32,
+            Num::Uint64(_) => &DataType::Uint64,
+            Num::Int8(_) => &DataType::Int8,
+            Num::Int16(_) => &DataType::Int16,
+            Num::Int32(_) => &DataType::Int32,
+            Num::Int64(_) => &DataType::Int64,
+            Num::Float(_) => &DataType::Float,
+            Num::Double(_) => &DataType::Double,
+            Num::Decimal(_) => &DataType::Decimal,
         }
     }
 }
@@ -309,7 +302,7 @@ impl std::fmt::Display for Num {
 pub struct Number(pub(crate) Num);
 
 impl TypeOf for Number {
-    fn type_of(&self) -> DataType {
+    fn type_of(&self) -> &DataType {
         self.0.type_of()
     }
 }
